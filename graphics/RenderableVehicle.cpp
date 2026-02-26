@@ -1,0 +1,1 @@
+// Пустой файл для заголовка RenderableVehicle.hpp
