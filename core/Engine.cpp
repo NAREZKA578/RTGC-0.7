@@ -1,184 +1,301 @@
-#include <windows.h>
-#include <cstdio>
+#include "Engine.hpp"
+#include "../graphics/Window.hpp"
+#include "../physics/PhysicsWorld.hpp"
+#include "../graphics/Renderer.hpp"
+#include "../audio/AudioSystem.hpp"
+#include "../network/NetworkSystem.hpp"
+#include "../world/WorldManager.hpp"
+#include "../game/CharacterController.hpp"
+#include "../game/InputManager.hpp"
+#include "../world/Terrain.hpp"
+#include "../core/Logger.hpp"
+#include <iostream>
+#include <thread>
+#include <chrono>
 
-namespace RTGC {
-    constexpr int WINDOW_WIDTH = 1280;
-    constexpr int WINDOW_HEIGHT = 720;
+Engine::Engine() 
+    : running(false)
+    , lastTime(0.0f)
+    , frameTime(0.0f)
+    , frameCount(0)
+    , fps(0.0f)
+    , totalTime(0.0f)
+    , startTime(std::chrono::steady_clock::now())
+    , renderer(nullptr)
+    , physicsWorld(nullptr)
+    , audioSystem(nullptr)
+    , networkSystem(nullptr)
+    , worldManager(nullptr)
+    , terrain(nullptr)
+    , character(nullptr)
+{
+}
+
+Engine::~Engine() {
+    Shutdown();
+}
+
+void Engine::InitializeSystems() {
+    // Initialize core systems
+    renderer = std::make_unique<Renderer>();
+    physicsWorld = std::make_unique<PhysicsWorld>();
+    audioSystem = std::make_unique<AudioSystem>();
+    networkSystem = std::make_unique<NetworkSystem>();
+    worldManager = std::make_unique<WorldManager>();
     
-    HWND g_hwnd = nullptr;
-    bool g_running = true;
-    int g_menuState = 0;  // 0 = main menu, 1 = city selection, 2 = game
+    // Initialize game objects
+    terrain = std::make_unique<Terrain>();
+    character = std::make_unique<CharacterController>();
     
-    struct City {
-        const char* name;
-        float x;
-        float y;
-        float z;
-    };
+    Logger::Log("Engine systems initialized");
+}
+
+void Engine::UpdateSystems(float dt) {
+    // Update core systems
+    physicsWorld->Update(dt);
+    renderer->Update(dt);
+    audioSystem->Update(dt);
+    networkSystem->Update(dt);
+    worldManager->Update(dt);
     
-    constexpr int CITY_COUNT = 15;
-    City g_cities[CITY_COUNT] = {
-        {"Novosibirsk", 100, 100, 0},
-        {"Krasnoyarsk", 80, 80, 0},
-        {"Irkutsk", 60, 120, 0},
-        {"Tomsk", 40, 140, 0},
-        {"Omsk", 20, 160, 0},
-        {"Barnaull", 20, 200, 0},
-        {"Kemerovo", 40, 220, 0},
-        {"Novokuznetsk", 60, 240, 0},
-        {"Krasnoyarsk (Krai)", 80, 280, 0},
-        {"Chita", 100, 260, 0},
-        {"Abakan", 80, 300, 0},
-        {"Dudinka", 140, 320, 0},
-        {"Nazarovosibirsk", 120, 340, 0},
-        {"Tayshet", 160, 360, 0}
-    };
+    // Update game objects
+    character->Update(dt);
+    terrain->Update(dt);
+}
+
+void Engine::RenderSystems() {
+    renderer->BeginFrame();
     
-    LRESULT CALLBACK WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
-        if (uMsg == WM_QUIT) {
-            g_running = false;
-            PostQuitMessage(0);
-            return 0;
-        }
-        return DefWindowProc(hwnd, uMsg, wParam, lParam);
+    // Render game objects
+    renderer->Render(*terrain);
+    renderer->Render(*character);
+    
+    renderer->EndFrame();
+}
+
+void Engine::ShutdownSystems() {
+    // Shutdown systems in reverse order
+    terrain.reset();
+    character.reset();
+    
+    worldManager.reset();
+    networkSystem.reset();
+    audioSystem.reset();
+    physicsWorld.reset();
+    renderer.reset();
+    
+    Logger::Log("Engine systems shutdown");
+}
+
+void Engine::HandleInput(float dt) {
+    inputManager.Update();
+    
+    // Process engine-level inputs
+    if (inputManager.IsKeyPressed(GLFW_KEY_ESCAPE)) {
+        running = false;
     }
     
-    bool CreateWindow() {
-        WNDCLAS wc = {};
-        wc.lpfnWndProc = WndProc;
-        wc.hInstance = GetModuleHandle(nullptr);
-        wc.lpszClassName = "RTGCWindow";
-        wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    // Pass input to subsystems
+    character->HandleInput(inputManager, dt);
+}
+
+void Engine::CalculateFPS() {
+    frameCount++;
+    auto currentTime = std::chrono::steady_clock::now();
+    float elapsed = std::chrono::duration<float>(currentTime - startTime).count();
+    
+    if (elapsed >= 1.0f) {
+        fps = frameCount / elapsed;
+        frameCount = 0;
+        startTime = currentTime;
+    }
+}
+
+bool Engine::Initialize() {
+    try {
+        Logger::Log("Initializing RTGC Engine...");
         
-        RegisterClassA(&wc);
+        // Initialize core systems
+        InitializeSystems();
         
-        g_hwnd = CreateWindowExA(
-            0, "RTGCWindow",
-            "RTGC - Siberian Cities",
-            WS_OVERLAPPEDWINDOW | WS_CAPTIONBOX | WS_MINIMIZEBOX | WS_SYSMENU,
-            CW_USEDEFAULT, CW_USEDEFAULT,
-            WINDOW_WIDTH, WINDOW_HEIGHT,
-            nullptr, nullptr, GetModuleHandle(nullptr), nullptr
-        );
-        
-        if (!g_hwnd) {
-            char buf[256];
-            sprintf_s(buf, "CreateWindow failed: %lu", GetLastError());
-            MessageBoxA(nullptr, "Error", buf, MB_OK);
+        // Initialize renderer
+        if (!renderer->Initialize()) {
+            Logger::LogError("Failed to initialize renderer");
             return false;
         }
         
-        ShowWindow(g_hwnd, SW_SHOW);
+        // Initialize physics
+        if (!physicsWorld->Initialize()) {
+            Logger::LogError("Failed to initialize physics world");
+            return false;
+        }
+        
+        // Initialize audio
+        if (!audioSystem->Initialize()) {
+            Logger::LogError("Failed to initialize audio system");
+            return false;
+        }
+        
+        // Initialize network
+        if (!networkSystem->Initialize()) {
+            Logger::LogError("Failed to initialize network system");
+            return false;
+        }
+        
+        // Initialize world manager
+        if (!worldManager->Initialize()) {
+            Logger::LogError("Failed to initialize world manager");
+            return false;
+        }
+        
+        running = true;
+        lastTime = 0.0f;
+        
+        Logger::Log("RTGC Engine initialized successfully!");
         return true;
+    } catch (const std::exception& e) {
+        Logger::LogError("Exception during engine initialization: ", e.what());
+        return false;
+    }
+}
+
+void Engine::Run() {
+    if (!running) {
+        Logger::LogError("Cannot run engine: not initialized");
+        return;
     }
     
-    void Run() {
-        while (g_running) {
-            MSG msg;
-            while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) {
-                TranslateMessage(&msg);
-                DispatchMessageA(&msg);
-            }
-            
-            HDC hdc = GetDC(g_hwnd);
-            
-            RECT clientRect;
-            GetClientRect(g_hwnd, &clientRect);
-            
-            if (g_menuState == 0) {
-                DrawMainMenu(hdc, clientRect);
-            } else if (g_menuState == 1) {
-                DrawCitySelection(hdc, clientRect);
-            } else if (g_menuState == 2) {
-                DrawGame(hdc, clientRect);
-            }
-            
-            ReleaseDC(g_hwnd, hdc);
-        }
-    }
-    }
+    Logger::Log("Starting RTGC Engine main loop...");
     
-    void DrawMainMenu(HDC hdc, RECT& rect) {
-        HBRUSH brush = CreateSolidBrush(RGB(30, 50, 70));
-        FillRect(hdc, &rect, brush);
-        DeleteObject(brush);
-        
-        SetBkMode(hdc, TRANSPARENT);
-        SetTextColor(hdc, RGB(255, 255, 255));
-        
-        SetTextAlign(hdc, TA_CENTER);
-        
-        TextOutA(hdc, 0, 0, "RTGC - Siberian Cities", 32);
-        TextOutA(hdc, 0, 40, "Press [1] Generate New City", 20);
-        TextOutA(hdc, 0, 80, "[2] Select Existing City", 20);
-        TextOutA(hdc, 0, 120, "[ESC] Exit", 20);
-    }
+    const float targetFrameTime = 1.0f / 60.0f; // 60 FPS target
     
-    void DrawCitySelection(HDC hdc, RECT& rect) {
-        HBRUSH brush = CreateSolidBrush(RGB(40, 60, 80));
-        FillRect(hdc, &rect, brush);
-        DeleteObject(brush);
+    while (running) {
+        auto frameStart = std::chrono::high_resolution_clock::now();
         
-        SetBkMode(hdc, TRANSPARENT);
-        SetTextColor(hdc, RGB(200, 255, 200));
-        SetTextAlign(hdc, TA_CENTER);
+        // Calculate delta time
+        float currentTime = std::chrono::duration<float>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+        float dt = currentTime - lastTime;
+        lastTime = currentTime;
         
-        TextOutA(hdc, 0, 0, "Select a city:", 28);
+        // Clamp delta time to prevent large jumps
+        if (dt > 0.1f) dt = 0.1f;
         
-        int y = 100;
-        for (int i = 0; i < CITY_COUNT; i++) {
-            char buf[128];
-            sprintf_s(buf, "%d. %s", i + 1, g_cities[i].name);
-            TextOutA(hdc, 100, y, buf, 20);
-            y += 30;
+        // Update total time
+        totalTime += dt;
+        
+        // Handle input
+        HandleInput(dt);
+        
+        // Update systems
+        UpdateSystems(dt);
+        
+        // Render
+        RenderSystems();
+        
+        // Calculate FPS
+        CalculateFPS();
+        
+        // Frame rate limiting
+        auto frameEnd = std::chrono::high_resolution_clock::now();
+        float frameDuration = std::chrono::duration<float>(frameEnd - frameStart).count();
+        
+        if (frameDuration < targetFrameTime) {
+            std::this_thread::sleep_for(std::chrono::duration<float>(targetFrameTime - frameDuration));
         }
         
-        TextOutA(hdc, 0, y + 20, "[ESC] Back to menu", 20);
-        TextOutA(hdc, 0, y + 50, "[ENTER] Start in selected city", 20);
+        frameTime = std::chrono::duration<float>(std::chrono::high_resolution_clock::now() - frameStart).count();
     }
     
-    void DrawGame(HDC hdc, RECT& rect) {
-        HBRUSH brush = CreateSolidBrush(RGB(100, 150, 100));
-        FillRect(hdc, &rect, brush);
-        DeleteObject(brush);
-        
-        SetBkMode(hdc, TRANSPARENT);
-        SetTextColor(hdc, RGB(255, 255, 255));
-        SetTextAlign(hdc, TA_LEFT);
-        
-        TextOutA(hdc, 20, 50, "Game running...", 16);
-        TextOutA(hdc, 20, 80, "Controls: WASD to move", 18);
-        TextOutA(hdc, 20, 120, "[ESC] Return to menu", 18);
-        
-        if (g_menuState == 3) {
-            DrawSelectedCity(hdc, rect);
-        }
-    }
+    Logger::Log("RTGC Engine main loop ended");
+}
+
+void Engine::Shutdown() {
+    if (!running) return;
     
-    void DrawSelectedCity(HDC hdc, RECT& rect) {
-        if (g_menuState < 3) return;
-        
-        City& city = g_cities[g_menuState - 3];
-        
-        HBRUSH brush = CreateSolidBrush(RGB(200, 150, 50));
-        Ellipse(hdc, 
-                rect.left + city.x * 2 + 50, rect.top - city.y * 2 - 50,
-                rect.left + city.x * 2 + 150, rect.top - city.y * 2 + 50,
-                RGB(100, 200, 100)
-        );
-        DeleteObject(brush);
-        
-        SetBkMode(hdc, TRANSPARENT);
-        SetTextColor(hdc, RGB(255, 200, 200));
-        SetTextAlign(hdc, TA_LEFT);
-        
-        char title[128];
-        sprintf_s(title, "City: %s", city.name);
-        TextOutA(hdc, 20, 30, title, 18);
-        
-        TextOutA(hdc, 20, 70, "Controls: WASD - Move", 16);
-        TextOutA(hdc, 20, 90, "Space - Jump", 16);
-        TextOutA(hdc, 20, 110, "[ESC] Back to menu", 18);
-        TextOutA(hdc, 20, 130, "[M] Open menu", 18);
+    Logger::Log("Shutting down RTGC Engine...");
+    
+    running = false;
+    ShutdownSystems();
+    
+    Logger::Log("RTGC Engine shutdown complete");
+}
+
+void Engine::SetWindowSize(int width, int height) {
+    if (renderer) {
+        renderer->SetWindowSize(width, height);
     }
+}
+
+void Engine::SetFullscreen(bool fullscreen) {
+    if (renderer) {
+        renderer->SetFullscreen(fullscreen);
+    }
+}
+
+void Engine::SetVSync(bool enabled) {
+    if (renderer) {
+        renderer->SetVSync(enabled);
+    }
+}
+
+void Engine::SetMasterVolume(float volume) {
+    if (audioSystem) {
+        audioSystem->SetMasterVolume(volume);
+    }
+}
+
+bool Engine::StartServer(int port) {
+    if (networkSystem) {
+        return networkSystem->StartServer(port);
+    }
+    return false;
+}
+
+bool Engine::ConnectToServer(const std::string& address, int port) {
+    if (networkSystem) {
+        return networkSystem->ConnectToServer(address, port);
+    }
+    return false;
+}
+
+void Engine::Disconnect() {
+    if (networkSystem) {
+        networkSystem->Disconnect();
+    }
+}
+
+void Engine::EnableDebugMode(bool enabled) {
+    if (renderer) {
+        renderer->EnableDebugMode(enabled);
+    }
+    if (physicsWorld) {
+        physicsWorld->EnableDebugMode(enabled);
+    }
+}
+
+void Engine::PrintPerformanceStats() {
+    Logger::Log("=== Performance Stats ===");
+    Logger::Log("FPS: ", fps);
+    Logger::Log("Frame Time: ", frameTime * 1000.0f, " ms");
+    Logger::Log("Total Runtime: ", totalTime, " s");
+    Logger::Log("=========================");
+}
+
+void Engine::SaveScreenshot(const std::string& filename) {
+    if (renderer) {
+        renderer->SaveScreenshot(filename);
+    }
+}
+
+void Engine::Pause() {
+    // TODO: Implement pause functionality
+}
+
+void Engine::Resume() {
+    // TODO: Implement resume functionality
+}
+
+void Engine::Reset() {
+    // TODO: Implement reset functionality
+}
 }
