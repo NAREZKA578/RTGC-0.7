@@ -1,32 +1,42 @@
 ```
-# Compiled and binary files
+# Compiled and build artifacts
 *.o
 *.obj
+*.exe
+*.dll
+*.so
+*.a
 *.out
 
-# Executables
-game
-
 # Dependencies
-raylib/
-
-# Build artifacts
-build/
-dist/
+node_modules/
+venv/
+.venv/
+__pycache__/
+.mypy_cache/
+.pytest_cache/
 target/
+.gradle/
 
-# Editor/IDE files
+# CUDA build artifacts
+*.cu.o
+*.ptx
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# Editors
 .vscode/
 .idea/
-*.swp
-*.swo
-*.tmp
-
-# Logs
-*.log
 
 # Environment
 .env
 .env.local
 *.env.*
+
+# Build systems
+build/
+dist/
 ```
