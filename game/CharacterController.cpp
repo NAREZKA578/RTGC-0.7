@@ -1,5 +1,5 @@
 #include "CharacterController.hpp"
-#include "../math/Vector3.hpp"
+#include "../core/Logger.hpp"
 #include <iostream>
 
 CharacterController::CharacterController()
@@ -15,12 +15,12 @@ void CharacterController::Initialize() {
 }
 
 void CharacterController::Update(float dt) {
-    // Простая гравитация
+    // Simple gravity
     if (!onGround) {
         velocity.y -= 9.81f * dt;
         position.y += velocity.y * dt;
 
-        // Проверка приземления
+        // Check ground collision
         if (position.y <= 0.0f) {
             position.y = 0.0f;
             velocity.y = 0.0f;
@@ -36,7 +36,7 @@ void CharacterController::Shutdown() {
 void CharacterController::Move(const Vector3& direction, float dt) {
     if (dt <= 0.0f) return;
 
-    // Простое движение без физики
+    // Simple movement without physics
     velocity.x = direction.x * 5.0f;
     velocity.z = direction.z * 5.0f;
 
@@ -46,7 +46,7 @@ void CharacterController::Move(const Vector3& direction, float dt) {
 
 void CharacterController::Jump() {
     if (onGround) {
-        velocity.y = 8.0f; // Импульс прыжка
+        velocity.y = 8.0f; // Jump impulse
         onGround = false;
     }
 }

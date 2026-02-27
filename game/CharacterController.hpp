@@ -1,8 +1,5 @@
 #pragma once
-#include "../core/Logger.hpp"
 #include "../math/Vector3.hpp"
-
-using namespace std;
 
 class CharacterController {
 private:
@@ -25,6 +22,5 @@ public:
     Vector3 GetPosition() const;
     void SetPosition(const Vector3& pos);
 
-    void* GetPxController() const { return nullptr; } // Заглушка для PhysX
     bool IsOnGround() const { return onGround; }
 };
