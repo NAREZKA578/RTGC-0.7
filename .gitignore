@@ -1,0 +1,32 @@
+```
+# Compiled and binary files
+*.o
+*.obj
+*.out
+
+# Executables
+game
+
+# Dependencies
+raylib/
+
+# Build artifacts
+build/
+dist/
+target/
+
+# Editor/IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
+*.env.*
+```
