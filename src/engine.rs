@@ -9,6 +9,7 @@ use crate::audio::AudioSystem;
 use crate::ecs::EcsManager;
 use crate::physics;
 use crate::graphics::renderer::MenuState;
+use crate::game::Game;
 
 pub struct Engine {
     pub graphics_context: GraphicsContext,
@@ -16,6 +17,7 @@ pub struct Engine {
     pub audio_system: AudioSystem,
     pub ecs_manager: EcsManager,
     pub physics_world: physics::PhysicsWorld,
+    pub game: Option<Game>,
     window: Arc<winit::window::Window>,
     last_frame_time: std::time::Instant,
 }
@@ -34,6 +36,7 @@ impl Engine {
             audio_system,
             ecs_manager,
             physics_world,
+            game: None,
             window,
             last_frame_time: std::time::Instant::now(),
         })
@@ -58,7 +61,7 @@ impl Engine {
                     MenuState::MainMenu | MenuState::Loading => {
                         // Exit the application
                     }
-                    MenuState::CitySelection | MenuState::Game | MenuState::WorldCreation | MenuState::Settings => {
+                    MenuState::CitySelection | MenuState::InGame | MenuState::WorldCreation | MenuState::Settings => {
                         // Go back to main menu
                         self.graphics_context.renderer.menu_state = MenuState::MainMenu;
                     }
@@ -113,9 +116,11 @@ impl Engine {
 
         // Update systems based on current menu state
         match self.graphics_context.renderer.menu_state {
-            MenuState::Game => {
-                // Update physics
-                self.physics_world.step();
+            MenuState::InGame => {
+                // Update game if it exists
+                if let Some(ref mut game) = self.game {
+                    game.update();
+                }
             }
             _ => {
                 // Update other systems as needed
