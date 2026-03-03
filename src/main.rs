@@ -13,6 +13,7 @@ mod audio;
 mod physics;
 mod ecs;
 mod ui;
+mod game;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
@@ -29,7 +30,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut engine = engine::Engine::new(window.clone())?;
     
     // Initialize game state
-    engine.graphics_context.renderer.menu_state = graphics::renderer::MenuState::MainMenu;
+    engine.game = Some(game::Game::new());
+    engine.graphics_context.renderer.menu_state = graphics::renderer::MenuState::InGame;
     
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
