@@ -50,6 +50,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             Event::RedrawRequested(_) => {
                 engine.update();
+                
+                // Update camera position based on truck position and rotation
+                if let Some(ref game) = engine.game {
+                    engine.graphics_context.renderer.update_camera_for_frame(
+                        game.get_truck_position(),
+                        game.get_truck_rotation()
+                    );
+                }
+                
                 engine.render().unwrap();
             }
             _ => {}
