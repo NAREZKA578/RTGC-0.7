@@ -3,6 +3,7 @@ use std::rc::Rc;
 use std::collections::HashMap;
 use nalgebra::{Vector3, Matrix4};
 use crate::graphics::{camera::Camera, mesh::Mesh, shader::Shader, texture::Texture};
+use crate::graphics::models::{Model as ModelGen, Vertex as ModelVertex};
 
 #[derive(Debug, Clone)]
 pub struct Vertex {
@@ -30,7 +31,7 @@ pub enum MenuState {
     Loading,
     MainMenu,
     CitySelection,
-    Game,
+    InGame,
     WorldCreation,
     Settings,
 }
@@ -134,7 +135,7 @@ impl Renderer {
             MenuState::Loading => self.render_loading_screen()?,
             MenuState::MainMenu => self.render_main_menu()?,
             MenuState::CitySelection => self.render_city_selection()?,
-            MenuState::Game => self.render_game()?,
+            MenuState::InGame => self.render_game()?,
             MenuState::WorldCreation => self.render_world_creation()?,
             MenuState::Settings => self.render_settings()?,
         }

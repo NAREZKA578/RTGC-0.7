@@ -126,6 +126,12 @@ impl Engine {
                     game.reset_truck();
                 }
             }
+            (winit::keyboard::Key::Character(ref c), ElementState::Pressed) if c == "e" || c == "E" => {
+                // Activate cargo action (pickup/drop)
+                if let Some(ref mut game) = self.game {
+                    game.activate_cargo_action();
+                }
+            }
             (winit::keyboard::Key::Character(ref c), ElementState::Pressed) if c == "1" => {
                 match self.graphics_context.renderer.menu_state {
                     MenuState::MainMenu => {
