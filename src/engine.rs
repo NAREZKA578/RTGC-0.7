@@ -54,6 +54,9 @@ impl Engine {
     }
 
     fn handle_key_event(&mut self, key_event: &KeyEvent) {
+        // Update input manager
+        self.input_manager.handle_keyboard_input(key_event);
+
         match (key_event.logical_key, key_event.state) {
             (winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape), ElementState::Pressed) => {
                 // Handle escape key differently based on current menu state
@@ -65,6 +68,62 @@ impl Engine {
                         // Go back to main menu
                         self.graphics_context.renderer.menu_state = MenuState::MainMenu;
                     }
+                }
+            }
+            (winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowUp), ElementState::Pressed) |
+            (winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowUp), ElementState::Released) => {
+                if let Some(ref mut game) = self.game {
+                    if key_event.state == ElementState::Pressed {
+                        game.set_throttle(1.0);
+                    } else {
+                        game.set_throttle(0.0);
+                    }
+                }
+            }
+            (winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowDown), ElementState::Pressed) |
+            (winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowDown), ElementState::Released) => {
+                if let Some(ref mut game) = self.game {
+                    if key_event.state == ElementState::Pressed {
+                        game.set_throttle(-1.0);
+                    } else {
+                        game.set_throttle(0.0);
+                    }
+                }
+            }
+            (winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowLeft), ElementState::Pressed) |
+            (winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowLeft), ElementState::Released) => {
+                if let Some(ref mut game) = self.game {
+                    if key_event.state == ElementState::Pressed {
+                        game.set_steering(-1.0);
+                    } else {
+                        game.set_steering(0.0);
+                    }
+                }
+            }
+            (winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowRight), ElementState::Pressed) |
+            (winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowRight), ElementState::Released) => {
+                if let Some(ref mut game) = self.game {
+                    if key_event.state == ElementState::Pressed {
+                        game.set_steering(1.0);
+                    } else {
+                        game.set_steering(0.0);
+                    }
+                }
+            }
+            (winit::keyboard::Key::Named(winit::keyboard::NamedKey::Space), ElementState::Pressed) |
+            (winit::keyboard::Key::Named(winit::keyboard::NamedKey::Space), ElementState::Released) => {
+                if let Some(ref mut game) = self.game {
+                    if key_event.state == ElementState::Pressed {
+                        game.set_brake(1.0);
+                    } else {
+                        game.set_brake(0.0);
+                    }
+                }
+            }
+            (winit::keyboard::Key::Character(ref c), ElementState::Pressed) if c == "r" || c == "R" => {
+                // Reset truck position
+                if let Some(ref mut game) = self.game {
+                    game.reset_truck();
                 }
             }
             (winit::keyboard::Key::Character(ref c), ElementState::Pressed) if c == "1" => {
@@ -104,9 +163,6 @@ impl Engine {
             }
             _ => {}
         }
-
-        // Update input manager
-        self.input_manager.handle_keyboard_input(key_event);
     }
 
     pub fn update(&mut self) {

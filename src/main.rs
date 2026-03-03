@@ -20,7 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new()
-        .with_title("RTGC - Siberian Cities")
+        .with_title("Off-Road Truck Simulator")
         .with_inner_size(winit::dpi::LogicalSize::new(1920, 1080))
         .build(&event_loop)?;
 
