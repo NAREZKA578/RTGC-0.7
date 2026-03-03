@@ -1,26 +1,22 @@
 ```
-# Compiled and build artifacts
-*.o
-*.obj
-*.exe
-*.dll
-*.so
-*.a
-*.out
-
 # Dependencies
 target/
-**/target/
+
+# Compiled files
+**/*.rs.bk
+**/*.rlib
+**/*.so
+**/*.dylib
+**/*.dll
 
 # Logs and temp files
 *.log
 *.tmp
-*.swp
 
 # Environment
 .env
 .env.local
-*.env.*
+.env.*
 
 # Editors
 .vscode/
@@ -28,7 +24,25 @@ target/
 *.swp
 *.swo
 
-# Build systems
-build/
+# Coverage
+coverage/
+htmlcov/
+.coverage
+
+# MyPy cache
+.mypy_cache/
+.pytest_cache/
+
+# Distribution artifacts
 dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+__pycache__/
+
+# System files
+.DS_Store
+Thumbs.db
 ```

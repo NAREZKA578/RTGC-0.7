@@ -1,0 +1,12 @@
+[package]
+name = "mud-runner-clone"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tetra = { version = "0.7", features = [\"sdl2_bundled\"] }
+rand = "0.8"
+
+[[bin]]
+name = "mud-runner-clone"
+path = "main.rs"
