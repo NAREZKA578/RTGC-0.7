@@ -1,20 +1,26 @@
 ```
 # Compiled and build artifacts
-target/
-**/*.rs.bk
-**/*.rlib
-**/*.so
-**/*.dylib
-**/*.dll
-**/*.exe
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.a
+*.out
 
 # Dependencies
-Cargo.lock
-vendor/
+target/
+**/target/
 
 # Logs and temp files
 *.log
 *.tmp
+*.swp
+
+# Environment
+.env
+.env.local
+*.env.*
 
 # Editors
 .vscode/
@@ -22,8 +28,7 @@ vendor/
 *.swp
 *.swo
 
-# Environment
-.env
-.env.local
-.env.*
+# Build systems
+build/
+dist/
 ```
