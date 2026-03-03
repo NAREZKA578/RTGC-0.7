@@ -2,7 +2,7 @@
 #include <thread>
 #include <chrono>
 #include <string>
-#include "physics/PhysXInitializer.hpp"
+
 
 Engine::Engine()
     : m_running(false)
@@ -33,11 +33,7 @@ Engine::~Engine() {
 bool Engine::Initialize() {
     Logger::Log("=== RTGC Engine Initializing ===");
     try {
-        // Initialize PhysX first
-        if (!PhysXInitializer::Init()) {
-            Logger::Error("Failed to initialize PhysX");
-            return false;
-        }
+
         
         InitializeSystems();
         m_startTime = std::chrono::steady_clock::now();
@@ -79,8 +75,7 @@ void Engine::InitializeSystems() {
     UpdateLoadingProgress(0.5f);
 
     // Vehicle
-    if (PhysXInitializer::gPhysics && PhysXInitializer::gMaterial) {
-        // Create a basic vehicle
+            // Create a basic vehicle
         VehicleType truckType;
         truckType.name = "Mud Truck";
         truckType.type = VehicleDriveType::Wheeled4WD;
@@ -107,7 +102,7 @@ void Engine::InitializeSystems() {
         wheel.position = glm::vec3(1.5f, -0.5f, -2.0f);
         truckType.wheels.push_back(wheel);
 
-        m_vehicle = std::make_unique<Vehicle>(PhysXInitializer::gPhysics, PhysXInitializer::gMaterial, truckType, PxVec3(0, 5, 0));
+        m_vehicle = std::make_unique<Vehicle>(truckType, Vec3(0, 5, 0));
         UpdateLoadingProgress(0.7f);
     }
 
@@ -296,15 +291,11 @@ void Engine::UpdateSystems(float dt) {
     if (m_terrain) m_terrain->Update(dt);
     if (m_vehicle) m_vehicle->Update(dt);
     
-    // Update PhysX scene
-    if (PhysXInitializer::gScene) {
-        PhysXInitializer::gScene->simulate(dt);
-        PhysXInitializer::gScene->fetchResults(true);
-    }
+
     
     // Update camera to follow vehicle
     if (m_vehicle && m_camera && m_vehicle->mActor) {
-        PxTransform transform = m_vehicle->mActor->getGlobalPose();
+        Transform transform = m_vehicle->mActor->getGlobalPose();
         glm::vec3 vehiclePos(transform.p.x, transform.p.y, transform.p.z);
         glm::quat vehicleRot(transform.q.w, transform.q.x, transform.q.y, transform.q.z);
         m_camera->Follow(vehiclePos, vehicleRot, dt);
