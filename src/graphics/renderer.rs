@@ -160,7 +160,7 @@ impl Renderer {
         Ok(())
     }
     
-    fn render_game(&self) -> Result<(), Box<dyn std::error::Error>> {
+    fn render_game(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         // Render the actual game scene
         println!("Game Scene");
         Ok(())

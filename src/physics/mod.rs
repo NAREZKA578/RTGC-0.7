@@ -97,12 +97,23 @@ impl PhysicsWorld {
         self.rigid_bodies.push(body);
     }
 
-    pub fn step(&mut self) {
+    pub fn step(&mut self, dt: f32) {
+        // Integrate forces and update velocities
         for body in &mut self.rigid_bodies {
-            body.update(self.time_step);
+            // Apply gravity
+            if body.inverse_mass > 0.0 {
+                body.apply_force(self.gravity * body.mass);
+            }
+            
+            // Update positions
+            body.position += body.velocity * dt;
+            
+            // Simple damping to prevent infinite acceleration
+            body.velocity *= 0.999;
+            body.angular_velocity *= 0.99;
         }
         
-        // Simple collision detection and response could go here
+        // Handle collisions
         self.handle_collisions();
     }
 
