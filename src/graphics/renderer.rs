@@ -143,6 +143,10 @@ impl Renderer {
         Ok(())
     }
     
+    pub fn update_camera_for_frame(&mut self, truck_position: Vector3<f32>, truck_rotation: UnitQuaternion<f32>) {
+        self.camera.update_for_truck(truck_position, truck_rotation);
+    }
+    
     fn render_loading_screen(&self) -> Result<(), Box<dyn std::error::Error>> {
         // Render loading screen
         println!("Loading...");

@@ -9,7 +9,7 @@ use crate::audio::AudioSystem;
 use crate::ecs::EcsManager;
 use crate::physics;
 use crate::graphics::renderer::MenuState;
-use crate::game::Game;
+use crate::game::{Game, Animation, AnimationType};
 
 pub struct Engine {
     pub graphics_context: GraphicsContext,
@@ -130,6 +130,25 @@ impl Engine {
                 // Activate cargo action (pickup/drop)
                 if let Some(ref mut game) = self.game {
                     game.activate_cargo_action();
+                }
+            }
+            (winit::keyboard::Key::Character(ref c), ElementState::Pressed) if c == "c" || c == "C" => {
+                // Switch camera view (first person/third person)
+                if let Some(ref mut game) = self.game {
+                    match self.graphics_context.renderer.camera.camera_type {
+                        crate::graphics::camera::CameraType::FirstPerson => {
+                            self.graphics_context.renderer.camera.switch_to_third_person(
+                                game.get_truck_position(),
+                                game.get_truck_rotation()
+                            );
+                        }
+                        crate::graphics::camera::CameraType::ThirdPerson => {
+                            self.graphics_context.renderer.camera.switch_to_first_person(
+                                game.get_truck_position(),
+                                game.get_truck_rotation()
+                            );
+                        }
+                    }
                 }
             }
             (winit::keyboard::Key::Character(ref c), ElementState::Pressed) if c == "1" => {
