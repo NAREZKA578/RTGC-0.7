@@ -3,6 +3,7 @@ pub mod camera;
 pub mod shader;
 pub mod mesh;
 pub mod texture;
+pub mod models;
 
 use winit::window::Window;
 use std::sync::Arc;
