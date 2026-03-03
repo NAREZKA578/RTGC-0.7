@@ -19,14 +19,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new()
-        .with_title("Game Engine")
-        .with_inner_size(winit::dpi::LogicalSize::new(1024, 768))
+        .with_title("RTGC - Siberian Cities")
+        .with_inner_size(winit::dpi::LogicalSize::new(1920, 1080))
         .build(&event_loop)?;
 
     let window = Arc::new(window);
     
     // Initialize engine components
     let mut engine = engine::Engine::new(window.clone())?;
+    
+    // Initialize game state
+    engine.graphics_context.renderer.menu_state = graphics::renderer::MenuState::MainMenu;
     
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
@@ -44,6 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 window.request_redraw();
             }
             Event::RedrawRequested(_) => {
+                engine.update();
                 engine.render().unwrap();
             }
             _ => {}
