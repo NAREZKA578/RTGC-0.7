@@ -7,6 +7,7 @@ use crate::graphics::GraphicsContext;
 use crate::input::InputManager;
 use crate::audio::AudioSystem;
 use crate::ecs::EcsManager;
+use crate::physics;
 use crate::graphics::renderer::MenuState;
 
 pub struct Engine {
@@ -14,6 +15,7 @@ pub struct Engine {
     pub input_manager: InputManager,
     pub audio_system: AudioSystem,
     pub ecs_manager: EcsManager,
+    pub physics_world: physics::PhysicsWorld,
     window: Arc<winit::window::Window>,
     last_frame_time: std::time::Instant,
 }
@@ -24,12 +26,14 @@ impl Engine {
         let input_manager = InputManager::new();
         let audio_system = AudioSystem::new()?;
         let ecs_manager = EcsManager::new();
+        let physics_world = physics::PhysicsWorld::new();
 
         Ok(Self {
             graphics_context,
             input_manager,
             audio_system,
             ecs_manager,
+            physics_world,
             window,
             last_frame_time: std::time::Instant::now(),
         })
@@ -110,7 +114,8 @@ impl Engine {
         // Update systems based on current menu state
         match self.graphics_context.renderer.menu_state {
             MenuState::Game => {
-                // Update game-specific systems
+                // Update physics
+                self.physics_world.step();
             }
             _ => {
                 // Update other systems as needed
