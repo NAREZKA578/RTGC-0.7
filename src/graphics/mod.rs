@@ -10,7 +10,7 @@ pub mod texture_streaming;
 use winit::window::Window;
 use std::sync::Arc;
 use glow::Context;
-use crate::graphics::renderer::Renderer;
+use crate::graphics::renderer::{Renderer, MenuState};
 
 pub struct GraphicsContext {
     pub renderer: Renderer,

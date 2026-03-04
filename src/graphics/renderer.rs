@@ -1,9 +1,11 @@
 use glow::Context;
 use std::rc::Rc;
 use std::collections::HashMap;
-use nalgebra::{Vector3, Matrix4};
+use nalgebra::{Vector3, Matrix4, UnitQuaternion};
 use crate::graphics::{camera::Camera, mesh::Mesh, shader::Shader, texture::Texture};
 use crate::graphics::models::{Model as ModelGen, Vertex as ModelVertex};
+use crate::graphics::lod_system::{LodManager, LodObject};
+use crate::graphics::texture_streaming::TextureStreamingSystem;
 
 #[derive(Debug, Clone)]
 pub struct Vertex {
@@ -24,6 +26,8 @@ pub struct Renderer {
     models: HashMap<String, Model>,
     current_city_index: usize,
     pub menu_state: MenuState,
+    pub lod_manager: LodManager,
+    pub texture_streaming: TextureStreamingSystem,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -122,6 +126,8 @@ impl Renderer {
             models: HashMap::new(),
             current_city_index: 0,
             menu_state: MenuState::Loading,
+            lod_manager: LodManager::new(),
+            texture_streaming: TextureStreamingSystem::new(128, 10.0, 5), // Max 128 textures, 10 units per tile, 5 tile radius
         })
     }
     
@@ -130,6 +136,15 @@ impl Renderer {
             self.gl.clear_color(0.1, 0.2, 0.3, 1.0);
             self.gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
         }
+
+        // Update LOD system based on camera position
+        self.lod_manager.update_all_lods(&self.camera.position);
+
+        // Update texture streaming based on camera position
+        self.texture_streaming.update_camera_position(nalgebra::Vector2::new(
+            self.camera.position.x,
+            self.camera.position.z,
+        ));
 
         match self.menu_state {
             MenuState::Loading => self.render_loading_screen()?,
@@ -165,9 +180,66 @@ impl Renderer {
         Ok(())
     }
     
-    fn render_game(&self) -> Result<(), Box<dyn std::error::Error>> {
-        // Render the actual game scene
-        println!("Game Scene");
+    fn render_game(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        // Render the actual game scene with proper OpenGL rendering
+        
+        // Get visible objects from LOD system
+        let visible_objects = self.lod_manager.get_objects_in_view(&self.camera.position, 100.0);
+        
+        // Use the shader
+        self.shader.bind();
+        
+        // Set up view and projection matrices
+        let projection = self.camera.projection_matrix();
+        let view = self.camera.view_matrix();
+        
+        unsafe {
+            let u_projection = self.gl.get_uniform_location(self.shader.program, "u_projection").unwrap();
+            let u_view = self.gl.get_uniform_location(self.shader.program, "u_view").unwrap();
+            let u_light_pos = self.gl.get_uniform_location(self.shader.program, "u_light_pos").unwrap();
+            let u_view_pos = self.gl.get_uniform_location(self.shader.program, "u_view_pos").unwrap();
+            let u_light_color = self.gl.get_uniform_location(self.shader.program, "u_light_color").unwrap();
+            
+            self.gl.uniform_matrix_4_f32_slice(Some(&u_projection), false, projection.as_slice());
+            self.gl.uniform_matrix_4_f32_slice(Some(&u_view), false, view.as_slice());
+            self.gl.uniform_3_f32(Some(&u_light_pos), 5.0, 5.0, 5.0);
+            self.gl.uniform_3_f32(Some(&u_view_pos), self.camera.position.x, self.camera.position.y, self.camera.position.z);
+            self.gl.uniform_3_f32(Some(&u_light_color), 1.0, 1.0, 1.0);
+        }
+        
+        // Render each visible object using appropriate LOD model
+        for (_index, lod_model) in visible_objects {
+            match lod_model {
+                crate::graphics::lod_system::LodModel::HighPoly { vertices, indices } => {
+                    // Render high-poly model
+                    // For now, just print that we're rendering
+                    println!("Rendering high-poly model");
+                },
+                crate::graphics::lod_system::LodModel::MediumPoly { vertices, indices } => {
+                    // Render medium-poly model
+                    // For now, just print that we're rendering
+                    println!("Rendering medium-poly model");
+                },
+                crate::graphics::lod_system::LodModel::LowPoly { vertices, indices } => {
+                    // Render low-poly model
+                    // For now, just print that we're rendering
+                    println!("Rendering low-poly model");
+                },
+                crate::graphics::lod_system::LodModel::Billboard { texture_id, size } => {
+                    // Render billboard
+                    // For now, just print that we're rendering
+                    println!("Rendering billboard with texture ID: {}, size: {}", texture_id, size);
+                },
+            }
+        }
+        
+        // Also render models from the traditional model system
+        for (_, model) in &self.models {
+            for mesh in &model.meshes {
+                mesh.draw();
+            }
+        }
+        
         Ok(())
     }
     

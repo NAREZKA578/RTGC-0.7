@@ -14,6 +14,7 @@ mod physics;
 mod ecs;
 mod ui;
 mod game;
+mod profiler;
 
 // Initialize tracing
 use tracing_subscriber;
@@ -39,6 +40,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     engine.game = Some(game::Game::new());
     engine.graphics_context.renderer.menu_state = graphics::renderer::MenuState::InGame;
     
+    let mut frame_count = 0;
+    let mut last_prof_report = std::time::Instant::now();
+    
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
         
@@ -48,6 +52,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 window_id,
             } if window_id == window.id() => {
                 if !engine.handle_window_event(event) {
+                    // Print profiling report before exiting
+                    profiler::print_profile_report();
                     *control_flow = ControlFlow::Exit;
                 }
             }
@@ -66,6 +72,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 
                 engine.render().unwrap();
+                
+                // Increment frame counter
+                frame_count += 1;
+                
+                // Print profiling report every 10 seconds
+                if last_prof_report.elapsed().as_secs() >= 10 {
+                    profiler::print_profile_report();
+                    profiler::reset_profiler(); // Reset for next period
+                    frame_count = 0;
+                    last_prof_report = std::time::Instant::now();
+                }
             }
             _ => {}
         }
