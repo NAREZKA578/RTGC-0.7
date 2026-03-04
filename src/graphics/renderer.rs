@@ -211,24 +211,24 @@ impl Renderer {
         for (_index, lod_model) in visible_objects {
             match lod_model {
                 crate::graphics::lod_system::LodModel::HighPoly { vertices, indices } => {
-                    // Render high-poly model
-                    // For now, just print that we're rendering
-                    println!("Rendering high-poly model");
+                    // Create and render a temporary mesh for high-poly model
+                    let mesh = Mesh::new(&self.gl, &vertices, &indices)?;
+                    mesh.draw();
                 },
                 crate::graphics::lod_system::LodModel::MediumPoly { vertices, indices } => {
-                    // Render medium-poly model
-                    // For now, just print that we're rendering
-                    println!("Rendering medium-poly model");
+                    // Create and render a temporary mesh for medium-poly model
+                    let mesh = Mesh::new(&self.gl, &vertices, &indices)?;
+                    mesh.draw();
                 },
                 crate::graphics::lod_system::LodModel::LowPoly { vertices, indices } => {
-                    // Render low-poly model
-                    // For now, just print that we're rendering
-                    println!("Rendering low-poly model");
+                    // Create and render a temporary mesh for low-poly model
+                    let mesh = Mesh::new(&self.gl, &vertices, &indices)?;
+                    mesh.draw();
                 },
                 crate::graphics::lod_system::LodModel::Billboard { texture_id, size } => {
-                    // Render billboard
-                    // For now, just print that we're rendering
-                    println!("Rendering billboard with texture ID: {}, size: {}", texture_id, size);
+                    // For billboards, we'd need to create quad geometry and apply the texture
+                    // This is a simplified approach - in a real engine, you'd want to optimize this
+                    // For now, just skip rendering since we don't have a texture reference here
                 },
             }
         }
