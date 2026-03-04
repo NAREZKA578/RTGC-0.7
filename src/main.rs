@@ -15,7 +15,13 @@ mod ecs;
 mod ui;
 mod game;
 
+// Initialize tracing
+use tracing_subscriber;
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize tracing subscriber
+    tracing_subscriber::fmt::init();
+    
     env_logger::init();
     
     let event_loop = EventLoop::new();
