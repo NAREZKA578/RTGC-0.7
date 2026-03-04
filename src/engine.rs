@@ -10,6 +10,7 @@ use crate::ecs::EcsManager;
 use crate::physics;
 use crate::graphics::renderer::MenuState;
 use crate::game::{Game, Animation, AnimationType};
+use crate::profiler;
 
 pub struct Engine {
     pub graphics_context: GraphicsContext,
@@ -195,22 +196,42 @@ impl Engine {
         let delta_time = (current_time - self.last_frame_time).as_secs_f32();
         self.last_frame_time = current_time;
 
+        // Start profiling the update cycle
+        profiler::start_timer("update_cycle");
+
         // Update systems based on current menu state
         match self.graphics_context.renderer.menu_state {
             MenuState::InGame => {
+                // Update physics world
+                profiler::start_timer("physics_step");
+                self.physics_world.step();
+                profiler::stop_timer("physics_step");
+
                 // Update game if it exists
                 if let Some(ref mut game) = self.game {
+                    profiler::start_timer("game_update");
                     game.update();
+                    profiler::stop_timer("game_update");
                 }
             }
             _ => {
                 // Update other systems as needed
             }
         }
+
+        // Stop profiling the update cycle
+        profiler::stop_timer("update_cycle");
     }
 
     pub fn render(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        // Start profiling the render cycle
+        profiler::start_timer("render_cycle");
+        
         self.graphics_context.render()?;
+        
+        // Stop profiling the render cycle
+        profiler::stop_timer("render_cycle");
+        
         Ok(())
     }
 }

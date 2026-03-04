@@ -512,34 +512,42 @@ impl PhysicsWorld {
         
         for i in 0..self.sub_steps {
             tracing::trace!("Starting sub-step {}", i);
-            // Integrate external forces using thread pool
-            let count = self.rigid_bodies.count();
-            let bodies_ptr = self.rigid_bodies.as_mut_ptr();
             
-            // Parallel force integration
-            (0..count).for_each(|i| {
-                unsafe {
-                    if let Some(body) = (*bodies_ptr).get_mut(i) {
-                        if !body.is_static {
-                            // Apply gravity
-                            body.apply_force(self.gravity * body.mass);
+            // Parallel force integration using thread pool
+            let count = self.rigid_bodies.count();
+            for j in 0..count {
+                let bodies_ptr = self.rigid_bodies.as_mut_ptr();
+                self.thread_pool.execute(move || {
+                    unsafe {
+                        if let Some(body) = (*bodies_ptr).get_mut(j) {
+                            if !body.is_static {
+                                // Apply gravity
+                                body.apply_force(self.gravity * body.mass);
+                            }
                         }
                     }
-                }
-            });
+                });
+            }
+            
+            // Wait for all force applications to complete
+            std::thread::sleep(std::time::Duration::from_micros(100)); // Small delay to allow tasks to complete
             
             // Update positions and orientations based on current forces using thread pool
             let count = self.rigid_bodies.count();
-            let bodies_ptr = self.rigid_bodies.as_mut_ptr();
-            
-            (0..count).for_each(|i| {
-                unsafe {
-                    if let Some(body) = (*bodies_ptr).get_mut(i) {
-                        body.update(sub_dt);
-                        body.clear_forces(); // Clear forces after integration
+            for j in 0..count {
+                let bodies_ptr = self.rigid_bodies.as_mut_ptr();
+                self.thread_pool.execute(move || {
+                    unsafe {
+                        if let Some(body) = (*bodies_ptr).get_mut(j) {
+                            body.update(sub_dt);
+                            body.clear_forces(); // Clear forces after integration
+                        }
                     }
-                }
-            });
+                });
+            }
+            
+            // Wait for all updates to complete
+            std::thread::sleep(std::time::Duration::from_micros(100)); // Small delay to allow tasks to complete
             
             // Broad phase collision detection (this can also be parallelized)
             self.broadphase_collision_detection();
