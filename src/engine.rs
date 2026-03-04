@@ -212,6 +212,15 @@ impl Engine {
                     profiler::start_timer("game_update");
                     game.update();
                     profiler::stop_timer("game_update");
+                    
+                    // Update texture streaming based on truck position
+                    if let Some(ref game) = self.game {
+                        let truck_position = game.get_truck_position();
+                        self.graphics_context.renderer.texture_streaming.update_camera_position(nalgebra::Vector2::new(
+                            truck_position.x,
+                            truck_position.z,
+                        ));
+                    }
                 }
             }
             _ => {
