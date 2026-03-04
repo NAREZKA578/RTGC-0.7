@@ -4,6 +4,8 @@ pub mod shader;
 pub mod mesh;
 pub mod texture;
 pub mod models;
+pub mod lod_system;
+pub mod texture_streaming;
 
 use winit::window::Window;
 use std::sync::Arc;
