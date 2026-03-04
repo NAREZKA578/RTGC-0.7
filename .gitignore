@@ -1,44 +1,12 @@
-```rust
+```
+# Backup files
+*.backup
+
 # Compiled and build artifacts
-*.o
-*.obj
-*.exe
-*.dll
-*.so
-*.a
-*.out
 target/
+**/*.rs.bk
+**/*.bk
 
 # Dependencies
-**/node_modules/
-**/venv/
-**/env/
-**/.venv/
-**/deps/
-**/Cargo.lock
-
-# Logs and temp files
-*.log
-*.tmp
-*.swp
-
-# Editors
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Rust-specific
-**/__pycache__/
-**/*.pyc
-**/*.pyo
-**/*.pyd
-**/.mypy_cache/
-**/.pytest_cache/
-**/htmlcov/
-**/coverage/
+Cargo.lock
 ```
