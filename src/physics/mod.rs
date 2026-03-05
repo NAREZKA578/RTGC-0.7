@@ -4,11 +4,15 @@ use num_cpus;
 mod spatial_hash;
 mod thread_pool;
 mod arena_allocator;
+mod advanced_vehicle;
 use spatial_hash::SpatialHash;
 use thread_pool::ThreadPool;
 use arena_allocator::ArenaAllocator;
+use advanced_vehicle::{AdvancedVehicle, AdvancedWheel, AdvancedSuspension};
 use tracing;
 
+pub mod advanced_vehicle;
+pub use advanced_vehicle::*;
 #[derive(Debug, Clone)]
 pub enum Shape {
     Sphere { radius: f32 },
