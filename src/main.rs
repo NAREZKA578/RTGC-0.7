@@ -6,14 +6,23 @@ use winit::{
 use std::sync::Arc;
 use parking_lot::Mutex;
 
+#[path = "engine.rs"]
 mod engine;
+#[path = "graphics/graphics_module.rs"]
 mod graphics;
+#[path = "input/input_module.rs"]
 mod input;
+#[path = "audio/audio_module.rs"]
 mod audio;
+#[path = "physics/physics_module.rs"]
 mod physics;
+#[path = "ecs/ecs_module.rs"]
 mod ecs;
+#[path = "ui/ui_module.rs"]
 mod ui;
+#[path = "game/game.rs"]
 mod game;
+#[path = "profiler.rs"]
 mod profiler;
 
 // Initialize tracing
