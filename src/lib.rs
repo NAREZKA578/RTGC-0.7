@@ -1,9 +1,18 @@
-pub mod ecs;
-pub mod physics;
-pub mod graphics;
+#[path = "audio/audio_module.rs"]
 pub mod audio;
-pub mod networking;
+#[path = "ecs/ecs_module.rs"]
+pub mod ecs;
+#[path = "graphics/graphics_module.rs"]
+pub mod graphics;
+#[path = "input/input_module.rs"]
+pub mod input;
+#[path = "physics/physics_module.rs"]
+pub mod physics;
+#[path = "render/render_module.rs"]
+pub mod render;
+#[path = "ui/ui_module.rs"]
 pub mod ui;
+pub mod networking;
 pub mod profiler;
 pub mod engine;
 

@@ -6,6 +6,7 @@ pub mod texture;
 pub mod material;
 pub mod camera;
 pub mod scene;
+pub mod pbr;
 
 pub use rhi::*;
 pub use renderer::*;
@@ -14,3 +15,4 @@ pub use texture::*;
 pub use material::*;
 pub use camera::*;
 pub use scene::*;
+pub use pbr::*;
