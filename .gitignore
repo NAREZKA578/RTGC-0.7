@@ -1,4 +1,45 @@
-```
+```rust
+# Compiled and build artifacts
+*.o
+*.obj
+*.a
+*.lib
+*.dll
+*.so
+*.dylib
 target/
-**/*.rs.bk
+
+# Dependencies
+Cargo.lock
+**/vendor/
+**/deps/
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Coverage
+coverage/
+htmlcov/
+.coverage
+
+# Rust-specific
+**/Cargo.lock
+**/target/
+**/deps/
+**/vendor/
+**/*.d
+**/*.hi
+**/*.o
 ```

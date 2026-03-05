@@ -6,7 +6,6 @@ pub mod ecs;
 pub mod graphics;
 #[path = "input/input_module.rs"]
 pub mod input;
-#[path = "physics/physics_module.rs"]
 pub mod physics;
 #[path = "render/render_module.rs"]
 pub mod render;

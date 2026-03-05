@@ -1,5 +1,5 @@
-```rust
 use std::vec::Vec;
+use std::ptr;
 
 /// A simple arena allocator for efficient memory management
 pub struct ArenaAllocator<T> {
@@ -91,5 +91,10 @@ impl<T> ArenaAllocator<T> {
         self.free_indices.clear();
         self.count = 0;
     }
+
+    /// Returns a raw mutable pointer to the underlying vector data
+    /// WARNING: This is unsafe and should be used with extreme caution
+    pub fn as_mut_ptr(&mut self) -> *mut Vec<Option<T>> {
+        &mut self.items as *mut Vec<Option<T>>
+    }
 }
-```
