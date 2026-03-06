@@ -1,12 +1,12 @@
-```rust
+```
 # Compiled and build artifacts
 *.o
 *.obj
 *.a
 *.lib
-*.dll
 *.so
 *.dylib
+*.dll
 target/
 
 # Dependencies
@@ -17,7 +17,6 @@ Cargo.lock
 # Logs and temp files
 *.log
 *.tmp
-*.swp
 
 # Editors
 .vscode/
@@ -25,21 +24,7 @@ Cargo.lock
 *.swp
 *.swo
 
-# OS
-.DS_Store
-Thumbs.db
-
-# Coverage
-coverage/
-htmlcov/
-.coverage
-
 # Rust-specific
-**/Cargo.lock
-**/target/
-**/deps/
-**/vendor/
-**/*.d
-**/*.hi
-**/*.o
+**/*.rs.bk
+Cargo.lock
 ```
