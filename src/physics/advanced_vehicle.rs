@@ -1,9 +1,10 @@
 use nalgebra::{Vector3, UnitQuaternion, Matrix3};
 use std::f32::consts::PI;
 
+/// Advanced suspension model with non-linear spring and separate compression/rebound damping
 #[derive(Debug, Clone)]
 pub struct AdvancedSuspension {
-    pub spring_stiffness: f32,           // N/m
+    pub spring_stiffness: f32,           // N/m (base stiffness)
     pub compression_damping: f32,        // N*s/m for compression
     pub rebound_damping: f32,            // N*s/m for rebound
     pub rest_length: f32,                // meters
@@ -15,6 +16,10 @@ pub struct AdvancedSuspension {
     pub slip_ratio: f32,                 // dimensionless
     pub slip_angle: f32,                 // radians
     pub camber_angle: f32,               // radians
+    // Non-linear spring parameters
+    pub progressive_rate: f32,           // Stiffness increase per meter of compression
+    pub bump_stop_stiffness: f32,        // Extra stiffness at max compression
+    pub bump_stop_start: f32,            // Compression ratio where bump stop engages (0.0-1.0)
 }
 
 impl AdvancedSuspension {
@@ -40,6 +45,52 @@ impl AdvancedSuspension {
             slip_ratio: 0.0,
             slip_angle: 0.0,
             camber_angle: 0.0,
+            // Non-linear spring defaults
+            progressive_rate: spring_stiffness * 0.5, // 50% increase at full compression
+            bump_stop_stiffness: spring_stiffness * 5.0, // 5x stiffness at bump stop
+            bump_stop_start: 0.8, // Engage at 80% compression
+        }
+    }
+
+    /// Create suspension with realistic car parameters
+    pub fn new_realistic_car_suspension(tire_radius: f32) -> Self {
+        // Typical values for a passenger car
+        Self {
+            spring_stiffness: 25000.0, // N/m (25 kN/m)
+            compression_damping: 1500.0, // N*s/m
+            rebound_damping: 2500.0, // N*s/m (higher than compression for stability)
+            rest_length: 0.4, // 40 cm
+            max_compression: 0.15, // 15 cm
+            max_extension: 0.1, // 10 cm
+            tire_radius,
+            friction_coefficient: 0.9, // Good asphalt grip
+            slip_ratio: 0.0,
+            slip_angle: 0.0,
+            camber_angle: 0.0,
+            progressive_rate: 15000.0,
+            bump_stop_stiffness: 150000.0,
+            bump_stop_start: 0.7,
+        }
+    }
+
+    /// Create suspension with realistic truck parameters
+    pub fn new_realistic_truck_suspension(tire_radius: f32) -> Self {
+        // Typical values for a heavy truck
+        Self {
+            spring_stiffness: 80000.0, // N/m (80 kN/m) - stiffer for heavier loads
+            compression_damping: 4000.0, // N*s/m
+            rebound_damping: 6000.0, // N*s/m
+            rest_length: 0.5, // 50 cm
+            max_compression: 0.2, // 20 cm
+            max_extension: 0.15, // 15 cm
+            tire_radius,
+            friction_coefficient: 0.7, // Lower grip due to larger contact patch
+            slip_ratio: 0.0,
+            slip_angle: 0.0,
+            camber_angle: 0.0,
+            progressive_rate: 40000.0,
+            bump_stop_stiffness: 400000.0,
+            bump_stop_start: 0.75,
         }
     }
 
@@ -79,10 +130,33 @@ impl AdvancedSuspension {
     }
 
     fn calculate_spring_force(&self, compression: f32) -> f32 {
-        // Non-linear spring with progressive rate could be implemented here
-        // For now, simple linear spring with limits
+        // Non-linear progressive spring with bump stop
+        let mut spring_force = 0.0;
+        
+        // Base linear spring force
         let effective_compression = compression.max(-self.max_compression).min(self.max_extension);
-        self.spring_stiffness * effective_compression
+        spring_force += self.spring_stiffness * effective_compression;
+        
+        // Progressive rate: stiffness increases with compression
+        if compression > 0.0 {
+            let progress = (compression / self.max_compression).min(1.0);
+            spring_force += self.progressive_rate * compression * progress;
+        }
+        
+        // Bump stop: extra stiffness when approaching max compression
+        let compression_ratio = if self.max_compression > 0.0 {
+            compression / self.max_compression
+        } else {
+            0.0
+        };
+        
+        if compression_ratio > self.bump_stop_start {
+            let bump_compression = compression_ratio - self.bump_stop_start;
+            let bump_factor = bump_compression / (1.0 - self.bump_stop_start);
+            spring_force += self.bump_stop_stiffness * bump_factor.powi(2) * self.max_compression;
+        }
+        
+        spring_force
     }
 
     fn calculate_damping_force(&self, wheel_velocity: Vector3<f32>, contact_normal: Vector3<f32>) -> f32 {
@@ -100,6 +174,7 @@ impl AdvancedSuspension {
         damping_coefficient * velocity_along_normal
     }
 
+    /// Advanced tire model using Pacejka Magic Formula for realistic force calculation
     fn calculate_tire_forces(
         &mut self,
         vehicle_velocity: Vector3<f32>,
@@ -112,18 +187,21 @@ impl AdvancedSuspension {
         let forward = Vector3::new(0.0, 0.0, 1.0); // Assuming wheel's forward direction
         let lateral = Vector3::new(1.0, 0.0, 0.0); // Assuming wheel's lateral direction
         
-        // Calculate slip ratio and slip angle (simplified)
+        // Calculate slip ratio: longitudinal slip during acceleration/braking
         let wheel_forward_vel = wheel_velocity.dot(&forward);
         let vehicle_forward_vel = vehicle_velocity.dot(&forward);
         
-        // Slip ratio: (wheel speed - vehicle speed) / |vehicle speed|
+        // Improved slip ratio calculation with proper sign handling
         if vehicle_forward_vel.abs() > 0.1 {
             self.slip_ratio = (wheel_forward_vel - vehicle_forward_vel) / vehicle_forward_vel.abs();
+        } else if wheel_forward_vel.abs() > 0.1 {
+            // Vehicle is stationary or very slow, use wheel speed as reference
+            self.slip_ratio = if wheel_forward_vel > 0.0 { 1.0 } else { -1.0 };
         } else {
             self.slip_ratio = 0.0;
         }
         
-        // Slip angle: angle between wheel heading and actual travel direction
+        // Calculate slip angle: lateral slip during cornering
         let side_slip_vel = vehicle_velocity.dot(&lateral);
         if vehicle_forward_vel.abs() > 0.1 {
             self.slip_angle = (side_slip_vel / vehicle_forward_vel.abs()).atan();
@@ -131,15 +209,33 @@ impl AdvancedSuspension {
             self.slip_angle = 0.0;
         }
         
-        // Using a simplified version of Pacejka's magic formula
+        // Apply Pacejka Magic Formula for realistic tire forces
         let max_grip = self.friction_coefficient * normal_force;
         
-        // Calculate longitudinal and lateral force factors based on slip
-        let longitudinal_factor = self.calculate_pacejka_value(self.slip_ratio, 10.0, 1.0, 1.0);
-        let lateral_factor = self.calculate_pacejka_value(self.slip_angle.to_degrees(), 10.0, 1.0, 1.0);
+        // Longitudinal force (acceleration/braking) using Pacejka formula
+        let longitudinal_factor = self.calculate_pacejka_magic_formula(
+            self.slip_ratio,
+            10.0,  // B (stiffness factor)
+            1.9,   // C (shape factor for longitudinal)
+            1.0,   // D (peak value)
+            0.0,   // E (curvature factor)
+        );
         
-        let longitudinal_force_magnitude = max_grip * longitudinal_factor;
-        let lateral_force_magnitude = max_grip * lateral_factor;
+        // Lateral force (cornering) using Pacejka formula
+        let lateral_factor = self.calculate_pacejka_magic_formula(
+            self.slip_angle.to_degrees(),
+            8.0,   // B (stiffness factor for lateral)
+            1.6,   // C (shape factor for lateral)
+            1.0,   // D (peak value)
+            -0.5,  // E (curvature factor for lateral)
+        );
+        
+        // Combine friction ellipse: reduce lateral grip when using longitudinal grip
+        let combined_longitudinal = longitudinal_factor;
+        let combined_lateral = lateral_factor * (1.0 - longitudinal_factor.abs() * 0.3);
+        
+        let longitudinal_force_magnitude = max_grip * combined_longitudinal;
+        let lateral_force_magnitude = max_grip * combined_lateral;
         
         // Apply forces in the correct directions
         let longitudinal_force = forward * longitudinal_force_magnitude;
@@ -148,14 +244,13 @@ impl AdvancedSuspension {
         (longitudinal_force, lateral_force)
     }
 
-    fn calculate_pacejka_value(&self, slip: f32, peak_slip: f32, peak_value: f32, curvature: f32) -> f32 {
-        // Simplified Pacejka-like function
-        let b = curvature;
-        let c = peak_value;
-        let d = peak_value;
-        
+    /// Pacejka Magic Formula: F(x) = D * sin(C * atan(B * x - E * (B * x - atan(B * x))))
+    /// This produces realistic tire force curves based on slip
+    fn calculate_pacejka_magic_formula(&self, slip: f32, b: f32, c: f32, d: f32, e: f32) -> f32 {
         let bx = b * slip;
-        d * (c * (bx - (bx * bx * 0.0174533).sin()).tan())
+        let atan_bx = bx.atan();
+        let inner = bx - e * (bx - atan_bx);
+        d * (c * inner).sin()
     }
 }
 
