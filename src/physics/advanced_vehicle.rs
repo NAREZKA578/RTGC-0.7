@@ -20,6 +20,11 @@ pub struct AdvancedSuspension {
     pub progressive_rate: f32,           // Stiffness increase per meter of compression
     pub bump_stop_stiffness: f32,        // Extra stiffness at max compression
     pub bump_stop_start: f32,            // Compression ratio where bump stop engages (0.0-1.0)
+    // Tire pressure and temperature simulation
+    pub tire_pressure: f32,              // PSI (pounds per square inch)
+    pub tire_temperature: f32,           // Celsius
+    pub ambient_temperature: f32,        // Ambient air temperature
+    pub tire_wear: f32,                  // 0.0 = new, 1.0 = worn out
 }
 
 impl AdvancedSuspension {
@@ -49,6 +54,11 @@ impl AdvancedSuspension {
             progressive_rate: spring_stiffness * 0.5, // 50% increase at full compression
             bump_stop_stiffness: spring_stiffness * 5.0, // 5x stiffness at bump stop
             bump_stop_start: 0.8, // Engage at 80% compression
+            // Tire pressure and temperature defaults
+            tire_pressure: 32.0, // PSI (typical car tire)
+            tire_temperature: 20.0, // Celsius (ambient)
+            ambient_temperature: 20.0, // Celsius
+            tire_wear: 0.0, // New tire
         }
     }
 
@@ -70,6 +80,11 @@ impl AdvancedSuspension {
             progressive_rate: 15000.0,
             bump_stop_stiffness: 150000.0,
             bump_stop_start: 0.7,
+            // Tire pressure and temperature
+            tire_pressure: 32.0, // PSI
+            tire_temperature: 20.0, // Celsius
+            ambient_temperature: 20.0, // Celsius
+            tire_wear: 0.0,
         }
     }
 
@@ -91,7 +106,97 @@ impl AdvancedSuspension {
             progressive_rate: 40000.0,
             bump_stop_stiffness: 400000.0,
             bump_stop_start: 0.75,
+            // Tire pressure and temperature
+            tire_pressure: 80.0, // PSI (truck tires have higher pressure)
+            tire_temperature: 25.0, // Celsius
+            ambient_temperature: 20.0, // Celsius
+            tire_wear: 0.0,
         }
+    }
+    
+    /// Update tire pressure based on temperature (ideal gas law approximation)
+    pub fn update_tire_pressure(&mut self, dt: f32) {
+        // P1/T1 = P2/T2 (Gay-Lussac's law)
+        // Pressure increases ~1 PSI per 10°F (5.5°C) temperature rise
+        let temp_kelvin = self.tire_temperature + 273.15;
+        let ref_temp_kelvin = 20.0 + 273.15; // Reference temperature at which pressure is set
+        let ref_pressure = 32.0; // Reference pressure
+        
+        // Adjust pressure based on temperature
+        self.tire_pressure = ref_pressure * (temp_kelvin / ref_temp_kelvin);
+        
+        // Clamp to reasonable range
+        self.tire_pressure = self.tire_pressure.clamp(20.0, 50.0);
+    }
+    
+    /// Update tire temperature based on friction, ambient temp, and cooling
+    pub fn update_tire_temperature(&mut self, slip_ratio: f32, slip_angle: f32, normal_force: f32, dt: f32) {
+        // Heat generation from friction (simplified model)
+        let total_slip = slip_ratio.abs() + slip_angle.abs();
+        let friction_heat = total_slip * normal_force * 0.001; // Simplified coefficient
+        
+        // Heat dissipation to ambient (Newton's law of cooling)
+        let cooling_rate = 0.5; // Cooling coefficient
+        let temp_diff = self.tire_temperature - self.ambient_temperature;
+        let cooling = cooling_rate * temp_diff;
+        
+        // Update temperature
+        self.tire_temperature += (friction_heat - cooling) * dt;
+        
+        // Clamp to reasonable range (-40°C to 120°C)
+        self.tire_temperature = self.tire_temperature.clamp(-40.0, 120.0);
+        
+        // Update pressure based on new temperature
+        self.update_tire_pressure(dt);
+    }
+    
+    /// Get effective friction coefficient based on tire condition
+    pub fn get_effective_friction(&self) -> f32 {
+        // Base friction modified by pressure, temperature, and wear
+        let mut friction = self.friction_coefficient;
+        
+        // Optimal pressure gives best grip (around 32 PSI for cars)
+        let optimal_pressure = 32.0;
+        let pressure_factor = 1.0 - ((self.tire_pressure - optimal_pressure).abs() / optimal_pressure) * 0.3;
+        friction *= pressure_factor.max(0.5);
+        
+        // Optimal temperature range (60-90°C for racing, lower for street)
+        let optimal_temp = 70.0;
+        let temp_diff = (self.tire_temperature - optimal_temp).abs();
+        let temp_factor = 1.0 - (temp_diff / 100.0).min(0.5);
+        friction *= temp_factor;
+        
+        // Wear reduces grip significantly
+        let wear_factor = 1.0 - self.tire_wear * 0.4; // Up to 40% reduction when fully worn
+        friction *= wear_factor;
+        
+        friction.clamp(0.3, 1.5)
+    }
+    
+    /// Update tire wear based on usage
+    pub fn update_tire_wear(&mut self, distance: f32, slip_ratio: f32, slip_angle: f32, normal_force: f32) {
+        // Base wear from distance
+        let base_wear = distance * 0.000001; // Very small per meter
+        
+        // Additional wear from slipping
+        let slip_wear = (slip_ratio.abs() + slip_angle.abs()) * normal_force * 0.00001;
+        
+        // High temperature accelerates wear
+        let temp_wear_factor = if self.tire_temperature > 90.0 {
+            1.0 + (self.tire_temperature - 90.0) / 30.0
+        } else {
+            1.0
+        };
+        
+        // Low pressure causes uneven wear
+        let pressure_wear_factor = if self.tire_pressure < 28.0 {
+            1.0 + (28.0 - self.tire_pressure) / 10.0
+        } else {
+            1.0
+        };
+        
+        self.tire_wear += (base_wear + slip_wear) * temp_wear_factor * pressure_wear_factor;
+        self.tire_wear = self.tire_wear.min(1.0);
     }
 
     pub fn update_suspension(

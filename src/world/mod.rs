@@ -18,12 +18,14 @@ pub mod terrain_generator;
 pub mod world_streaming;
 pub mod lod_system;
 pub mod spatial_index;
+pub mod day_night_cycle;
 
 pub use chunk::{Chunk, ChunkId, ChunkData, CHUNK_SIZE};
 pub use terrain_generator::{TerrainGenerator, NoiseConfig};
 pub use world_streaming::{WorldStreamer, StreamingConfig};
 pub use lod_system::LodSystem;
 pub use spatial_index::{SpatialIndex, QueryResult};
+pub use day_night_cycle::{DayNightCycle, CelestialBody, MoonPhase, TimeOfDay};
 
 /// Main world manager that coordinates all world subsystems
 pub struct OpenWorld {
