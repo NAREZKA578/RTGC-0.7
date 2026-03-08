@@ -18,6 +18,10 @@ pub mod profiler;
 pub mod engine;
 #[path = "world/mod.rs"]
 pub mod world;
+#[path = "weather/mod.rs"]
+pub mod weather;
+#[path = "game/mission_save.rs"]
+pub mod game;
 
 pub use ecs::*;
 pub use physics::*;
@@ -28,6 +32,8 @@ pub use ui::*;
 pub use profiler::*;
 pub use engine::*;
 pub use world::*;
+pub use weather::*;
+pub use game::*;
 
 // Core engine types re-export
 pub use nalgebra;
