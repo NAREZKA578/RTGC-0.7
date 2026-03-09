@@ -1,42 +1,74 @@
 [package]
-name = "game-engine"
-version = "0.1.0"
+name = "rtgc"
+version = "0.7.0"
 edition = "2021"
+authors = ["RTGC Team"]
+description = "Russian Technological Game Core"
 
 [dependencies]
-winit = "0.28"
-glutin = "0.30"
-glow = "0.15"
-wgpu = "0.18"
-nalgebra = "0.32"
-glam = "0.24"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+# Window & Input
+winit = "0.30"
+raw-window-handle = "0.6"
+
+# Math (можно заменить на свою реализацию)
+glam = "0.28"
+
+# DX12 (Windows)
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D12",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_System_Threading",
+]}
+
+# Vulkan (Cross-platform)
+ash = "0.38"
+
+# Threading
+rayon = "1.10"
+tokio = { version = "1", features = ["full"] }
 parking_lot = "0.12"
-crossbeam-channel = "0.5"
-image = "0.24"
-rodio = "0.17"
-env_logger = "0.10"
-log = "0.4"
-anyhow = "1.0"
-thiserror = "1.0"
-bytemuck = "1.0"
-num_cpus = "1.0"
-rayon = "1.7"
+
+# Audio
+cpal = "0.15"
+
+# Assets
+image = "0.25"
+ddsfile = "0.5"
+ktx2 = "0.3"
+gltf = "1.4"
+
+# Logging & Profiling
 tracing = "0.1"
 tracing-subscriber = "0.3"
-once_cell = "1.19"
-ash = "0.37"
-vk-sys = "0.9"
-cgmath = "0.18"
-rand = "0.8"
-bincode = "1.3"
-byteorder = "1.4"
-rapier3d = { version = "0.17", features = ["simd-nightly"] }
+tracy-client = { version = "0.17", optional = true }
 
-[dev-dependencies]
-criterion = "0.5"
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
-[[bin]]
-name = "game-engine"
-path = "src/main.rs"
+# Error Handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Utilities
+bytemuck = "1.18"
+bitflags = "2.6"
+
+[features]
+default = ["profiling", "dx12", "vulkan"]
+profiling = ["tracy-client"]
+dx12 = []
+vulkan = []
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+debug = false
