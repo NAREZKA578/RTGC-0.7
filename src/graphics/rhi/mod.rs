@@ -4,32 +4,35 @@
 pub mod types;
 pub mod device;
 
+#[cfg(feature = "dx12")]
+pub mod dx12;
+
+#[cfg(feature = "vulkan")]
+pub mod vulkan;
+
 pub use types::*;
 pub use device::*;
+
+#[cfg(feature = "dx12")]
+pub use dx12::*;
+
+#[cfg(feature = "vulkan")]
+pub use vulkan::*;
 
 /// RHI Factory - creates device instances for different backends
 pub struct RhiFactory;
 
 impl RhiFactory {
     /// Create a device with the specified backend
-    pub fn create_device(backend: GraphicsBackend) -> RhiResult<Box<dyn IDevice>> {
+    pub fn create_device(backend: GraphicsBackend, enable_validation: bool) -> RhiResult<Box<dyn IDevice>> {
         match backend {
             #[cfg(all(target_os = "windows", feature = "dx12"))]
-            GraphicsBackend::DirectX12 => {
-                // dx12::create_device()
-                Err(RhiError::Unsupported("DirectX 12 backend not yet implemented".to_string()))
-            }
+            GraphicsBackend::DirectX12 => dx12::create_dx12_device(enable_validation),
+            
             #[cfg(feature = "vulkan")]
-            GraphicsBackend::Vulkan => {
-                // vulkan::create_device()
-                Err(RhiError::Unsupported("Vulkan backend not yet implemented".to_string()))
-            }
-            #[cfg(feature = "opengl")]
-            GraphicsBackend::OpenGL => {
-                // opengl::create_device()
-                Err(RhiError::Unsupported("OpenGL fallback backend not yet implemented".to_string()))
-            }
-            _ => Err(RhiError::Unsupported("No graphics backend available".to_string())),
+            GraphicsBackend::Vulkan => vulkan::create_vulkan_device(enable_validation),
+            
+            _ => Err(RhiError::Unsupported("Requested backend is not available".to_string())),
         }
     }
     
@@ -47,6 +50,7 @@ impl RhiFactory {
             }
             #[cfg(not(feature = "vulkan"))]
             {
+                // Fallback to OpenGL (not yet implemented in RHI)
                 GraphicsBackend::OpenGL
             }
         }
