@@ -1,3 +1,5 @@
+#[path = "assets/mod.rs"]
+pub mod assets;
 #[path = "audio/audio_module.rs"]
 pub mod audio;
 #[path = "ecs/ecs_module.rs"]
@@ -23,6 +25,7 @@ pub mod weather;
 #[path = "game/mission_save.rs"]
 pub mod game;
 
+pub use assets::*;
 pub use ecs::*;
 pub use physics::*;
 pub use graphics::*;

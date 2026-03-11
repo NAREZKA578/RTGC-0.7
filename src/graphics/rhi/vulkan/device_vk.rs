@@ -6,6 +6,7 @@ use crate::graphics::rhi::{
     device::*,
 };
 use std::sync::Arc;
+use std::collections::HashMap;
 
 /// Vulkan Device implementation
 pub struct VkDevice {
@@ -22,18 +23,41 @@ pub struct VkDevice {
     device: ash::Device,
     
     #[cfg(feature = "vulkan")]
+    graphics_queue: ash::vk::Queue,
+    
+    #[cfg(feature = "vulkan")]
+    compute_queue: ash::vk::Queue,
+    
+    #[cfg(feature = "vulkan")]
+    transfer_queue: ash::vk::Queue,
+    
+    #[cfg(feature = "vulkan")]
     queue_family_index: u32,
+    
+    #[cfg(feature = "vulkan")]
+    compute_queue_family_index: u32,
+    
+    #[cfg(feature = "vulkan")]
+    transfer_queue_family_index: u32,
     
     features: DeviceFeatures,
     limits: DeviceLimits,
     name: String,
+    
+    // Resource tracking
+    buffers: parking_lot::Mutex<HashMap<u64, Arc<VkBuffer>>>,
+    textures: parking_lot::Mutex<HashMap<u64, Arc<VkTexture>>>,
+    samplers: parking_lot::Mutex<HashMap<u64, ash::vk::Sampler>>,
+    shaders: parking_lot::Mutex<HashMap<u64, ash::vk::ShaderModule>>,
+    pipelines: parking_lot::Mutex<HashMap<u64, ash::vk::Pipeline>>,
+    descriptor_sets: parking_lot::Mutex<HashMap<u64, ash::vk::DescriptorSet>>,
 }
 
 unsafe impl Send for VkDevice {}
 unsafe impl Sync for VkDevice {}
 
 impl VkDevice {
-    /// Create a new Vulkan device
+    /// Create a new Vulkan device with specified backend features
     pub fn new(enable_validation: bool) -> RhiResult<Self> {
         #[cfg(feature = "vulkan")]
         {
@@ -43,7 +67,7 @@ impl VkDevice {
             let entry = unsafe { ash::Entry::load() }
                 .map_err(|e| RhiError::InitializationFailed(format!("Failed to load Vulkan library: {}", e)))?;
             
-            // Create Vulkan instance
+            // Create Vulkan instance with VK 1.3 support for advanced features
             let app_info = vk::ApplicationInfo::builder()
                 .application_name(cstr!("RTGC Engine"))
                 .application_version(vk::make_api_version(0, 1, 0, 0))
@@ -62,6 +86,9 @@ impl VkDevice {
             #[cfg(target_os = "linux")]
             enabled_extensions.push(cstr!(ash::extensions::khr::XlibSurface::NAME).as_ptr());
             
+            #[cfg(target_os = "macos")]
+            enabled_extensions.push(cstr!(ash::extensions::mvk::MacOSSurface::NAME).as_ptr());
+            
             if enable_validation {
                 enabled_layers.push(cstr!("VK_LAYER_KHRONOS_validation").as_ptr());
                 enabled_extensions.push(cstr!(ash::extensions::ext::DebugUtils::NAME).as_ptr());
@@ -75,7 +102,7 @@ impl VkDevice {
             let instance = unsafe { entry.create_instance(&create_info, None) }
                 .map_err(|e| RhiError::InitializationFailed(format!("Failed to create Vulkan instance: {}", e)))?;
             
-            // Find physical device
+            // Find physical device with GPU occlusion query support
             let physical_devices = unsafe { instance.enumerate_physical_devices() }
                 .map_err(|e| RhiError::InitializationFailed(format!("Failed to enumerate physical devices: {}", e)))?;
             
@@ -83,37 +110,76 @@ impl VkDevice {
                 .find(|&device| Self::is_suitable_device(&instance, device))
                 .ok_or_else(|| RhiError::InitializationFailed("No suitable Vulkan device found".to_string()))?;
             
-            // Get queue family index
-            let queue_family_index = Self::find_queue_family(&instance, physical_device);
+            // Get queue family indices for graphics, compute, and transfer
+            let (graphics_queue_family, compute_queue_family, transfer_queue_family) = 
+                Self::find_queue_families(&instance, physical_device);
             
-            // Create logical device
+            // Create logical device with multiple queue types
             let priorities = [1.0f32];
-            let queue_info = vk::DeviceQueueCreateInfo::builder()
-                .queue_family_index(queue_family_index)
-                .queue_priorities(&priorities);
+            let mut queue_create_infos = Vec::new();
             
-            let mut enabled_features = vk::PhysicalDeviceFeatures::builder()
-                .fill_mode_non_solid(true)
-                .multi_draw_indirect(true)
-                .draw_indirect_first_instance(true)
-                .depth_bounds(false)
-                .wide_lines(false)
-                .large_points(false)
-                .alpha_to_one(false)
-                .logic_op(false)
-                .multi_viewport(false);
+            let graphics_queue_info = vk::DeviceQueueCreateInfo::builder()
+                .queue_family_index(graphics_queue_family)
+                .queue_priorities(&priorities);
+            queue_create_infos.push(graphysics_queue_info);
+            
+            if compute_queue_family != graphics_queue_family {
+                let compute_queue_info = vk::DeviceQueueCreateInfo::builder()
+                    .queue_family_index(compute_queue_family)
+                    .queue_priorities(&priorities);
+                queue_create_infos.push(compute_queue_info);
+            }
+            
+            if transfer_queue_family != graphics_queue_family && transfer_queue_family != compute_queue_family {
+                let transfer_queue_info = vk::DeviceQueueCreateInfo::builder()
+                    .queue_family_index(transfer_queue_family)
+                    .queue_priorities(&priorities);
+                queue_create_infos.push(transfer_queue_info);
+            }
+            
+            // Enable Vulkan 1.3 features for advanced rendering
+            let mut vulkan_13_features = vk::PhysicalDeviceVulkan13Features::builder()
+                .synchronization2(true)
+                .dynamic_rendering(true)
+                .maintenance4(true);
+            
+            let mut enabled_features = vk::PhysicalDeviceFeatures2::builder()
+                .push_next(&mut vulkan_13_features)
+                .features(vk::PhysicalDeviceFeatures::builder()
+                    .fill_mode_non_solid(true)
+                    .multi_draw_indirect(true)
+                    .draw_indirect_first_instance(true)
+                    .depth_bounds(true)
+                    .occlusion_query_precise(true)
+                    .pipeline_statistics_query(true)
+                    .sample_rate_shading(true)
+                    .dual_src_blend(true)
+                    .independent_blend(true)
+                    .geometry_shader(true)
+                    .tessellation_shader(true)
+                    .shader_storage_image_extended_formats(true)
+                    .build());
             
             let mut enabled_extensions = vec![
                 cstr!(ash::extensions::khr::Swapchain::NAME).as_ptr(),
+                cstr!(ash::extensions::ext::ExtendedDynamicState::NAME).as_ptr(),
             ];
             
+            // Enable occlusion query extension for GPU occlusion culling
+            enabled_extensions.push(cstr!(ash::extensions::khr::GetPhysicalDeviceProperties2::NAME).as_ptr());
+            
             let device_info = vk::DeviceCreateInfo::builder()
-                .queue_create_infos(std::slice::from_ref(&queue_info))
+                .queue_create_infos(&queue_create_infos)
                 .enabled_extension_names(&enabled_extensions)
-                .enabled_features(&enabled_features);
+                .push_next(&mut enabled_features);
             
             let device = unsafe { instance.create_device(physical_device, &device_info, None) }
                 .map_err(|e| RhiError::InitializationFailed(format!("Failed to create logical device: {}", e)))?;
+            
+            // Get queues
+            let graphics_queue = unsafe { device.get_device_queue(graphics_queue_family, 0) };
+            let compute_queue = unsafe { device.get_device_queue(compute_queue_family, 0) };
+            let transfer_queue = unsafe { device.get_device_queue(transfer_queue_family, 0) };
             
             // Query device properties
             let device_properties = unsafe { instance.get_physical_device_properties(physical_device) };
@@ -126,10 +192,21 @@ impl VkDevice {
                 instance,
                 physical_device,
                 device,
-                queue_family_index,
+                graphics_queue,
+                compute_queue,
+                transfer_queue,
+                queue_family_index: graphics_queue_family,
+                compute_queue_family_index: compute_queue_family,
+                transfer_queue_family_index: transfer_queue_family,
                 features: Self::query_features(),
                 limits: Self::query_limits(&instance, physical_device),
                 name,
+                buffers: parking_lot::Mutex::new(HashMap::new()),
+                textures: parking_lot::Mutex::new(HashMap::new()),
+                samplers: parking_lot::Mutex::new(HashMap::new()),
+                shaders: parking_lot::Mutex::new(HashMap::new()),
+                pipelines: parking_lot::Mutex::new(HashMap::new()),
+                descriptor_sets: parking_lot::Mutex::new(HashMap::new()),
             })
         }
         
@@ -137,6 +214,47 @@ impl VkDevice {
         {
             Err(RhiError::Unsupported("Vulkan feature not enabled".to_string()))
         }
+    }
+    
+    #[cfg(feature = "vulkan")]
+    fn find_queue_families(
+        instance: &ash::Instance, 
+        physical_device: ash::vk::PhysicalDevice
+    ) -> (u32, u32, u32) {
+        use ash::vk;
+        
+        let queue_families = unsafe { instance.get_physical_device_queue_family_properties(physical_device) };
+        
+        let mut graphics_family = None;
+        let mut compute_family = None;
+        let mut transfer_family = None;
+        
+        for (i, family) in queue_families.iter().enumerate() {
+            let flags = family.queue_flags;
+            let index = i as u32;
+            
+            // Graphics queue
+            if flags.contains(vk::QueueFlags::GRAPHICS) && graphics_family.is_none() {
+                graphics_family = Some(index);
+            }
+            
+            // Compute queue (prefer dedicated)
+            if flags.contains(vk::QueueFlags::COMPUTE) && !flags.contains(vk::QueueFlags::GRAPHICS) && compute_family.is_none() {
+                compute_family = Some(index);
+            }
+            
+            // Transfer queue (prefer dedicated)
+            if flags.contains(vk::QueueFlags::TRANSFER) && !flags.contains(vk::QueueFlags::GRAPHICS) && !flags.contains(vk::QueueFlags::COMPUTE) && transfer_family.is_none() {
+                transfer_family = Some(index);
+            }
+        }
+        
+        // Fallback to graphics queue if dedicated queues not found
+        let graphics = graphics_family.unwrap_or(0);
+        let compute = compute_family.unwrap_or(graphics);
+        let transfer = transfer_family.unwrap_or(graphics);
+        
+        (graphics, compute, transfer)
     }
     
     #[cfg(feature = "vulkan")]
@@ -150,23 +268,18 @@ impl VkDevice {
         let is_discrete = props.device_type == vk::PhysicalDeviceType::DISCRETE_GPU;
         let is_integrated = props.device_type == vk::PhysicalDeviceType::INTEGRATED_GPU;
         
-        // Must support geometry shaders and have minimum required features
+        // Must support geometry shaders and have minimum required features including occlusion query
         let has_required_features = features.geometry_shader == vk::TRUE &&
                                     features.multi_draw_indirect == vk::TRUE &&
-                                    features.fill_mode_non_solid == vk::TRUE;
+                                    features.fill_mode_non_solid == vk::TRUE &&
+                                    features.occlusion_query_precise == vk::TRUE;
         
         (is_discrete || is_integrated) && has_required_features
     }
     
-    #[cfg(feature = "vulkan")]
-    fn find_queue_family(instance: &ash::Instance, physical_device: ash::vk::PhysicalDevice) -> u32 {
-        use ash::vk;
-        
-        let queue_families = unsafe { instance.get_physical_device_queue_family_properties(physical_device) };
-        
-        queue_families.iter().position(|q| {
-            q.queue_flags.contains(vk::QueueFlags::GRAPHICS | vk::QueueFlags::COMPUTE)
-        }).unwrap_or(0) as u32
+    #[cfg(not(feature = "vulkan"))]
+    fn is_suitable_device(_instance: &ash::Instance, _device: ash::vk::PhysicalDevice) -> bool {
+        false
     }
     
     fn query_features() -> DeviceFeatures {
