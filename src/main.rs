@@ -20,7 +20,7 @@ mod physics;
 mod ecs;
 #[path = "ui/ui_module.rs"]
 mod ui;
-#[path = "game/game.rs"]
+#[path = "game/mission_save.rs"]
 mod game;
 #[path = "profiler.rs"]
 mod profiler;

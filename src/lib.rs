@@ -1,4 +1,4 @@
-#[path = "assets/mod.rs"]
+#[path = "assets/assets_module.rs"]
 pub mod assets;
 #[path = "audio/audio_module.rs"]
 pub mod audio;
@@ -15,12 +15,11 @@ pub mod physics;
 pub mod render;
 #[path = "ui/ui_module.rs"]
 pub mod ui;
-pub mod networking;
 pub mod profiler;
 pub mod engine;
-#[path = "world/mod.rs"]
+#[path = "world/world_module.rs"]
 pub mod world;
-#[path = "weather/mod.rs"]
+#[path = "weather/weather_module.rs"]
 pub mod weather;
 #[path = "game/mission_save.rs"]
 pub mod game;
@@ -30,7 +29,6 @@ pub use ecs::*;
 pub use physics::*;
 pub use graphics::*;
 pub use audio::*;
-pub use networking::*;
 pub use ui::*;
 pub use profiler::*;
 pub use engine::*;

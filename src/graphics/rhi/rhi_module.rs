@@ -5,19 +5,19 @@ pub mod types;
 pub mod device;
 
 #[cfg(feature = "dx12")]
-pub mod dx12;
+pub mod dx12_module;
 
 #[cfg(feature = "vulkan")]
-pub mod vulkan;
+pub mod vulkan_module;
 
 pub use types::*;
 pub use device::*;
 
 #[cfg(feature = "dx12")]
-pub use dx12::*;
+pub use dx12_module::*;
 
 #[cfg(feature = "vulkan")]
-pub use vulkan::*;
+pub use vulkan_module::*;
 
 /// RHI Factory - creates device instances for different backends
 pub struct RhiFactory;
@@ -27,10 +27,10 @@ impl RhiFactory {
     pub fn create_device(backend: GraphicsBackend, enable_validation: bool) -> RhiResult<Box<dyn IDevice>> {
         match backend {
             #[cfg(all(target_os = "windows", feature = "dx12"))]
-            GraphicsBackend::DirectX12 => dx12::create_dx12_device(enable_validation),
+            GraphicsBackend::DirectX12 => dx12_module::create_dx12_device(enable_validation),
             
             #[cfg(feature = "vulkan")]
-            GraphicsBackend::Vulkan => vulkan::create_vulkan_device(enable_validation),
+            GraphicsBackend::Vulkan => vulkan_module::create_vulkan_device(enable_validation),
             
             _ => Err(RhiError::Unsupported("Requested backend is not available".to_string())),
         }
