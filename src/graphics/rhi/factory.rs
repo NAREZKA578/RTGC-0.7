@@ -6,10 +6,10 @@ use crate::graphics::rhi::types::RhiResult;
 use std::sync::Arc;
 
 #[cfg(feature = "dx12")]
-use crate::graphics::rhi::dx12::Dx12Device;
+use crate::graphics::rhi::dx12_module::Dx12Device;
 
 #[cfg(feature = "vulkan")]
-use crate::graphics::rhi::vulkan::VkDevice;
+use crate::graphics::rhi::vulkan_module::VkDevice;
 
 /// Graphics API backend selection
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
