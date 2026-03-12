@@ -148,10 +148,10 @@ impl DependencyManager {
     }
 }
 
-/// Основной класс Job System
+/// Основной класс Job System с безопасной инициализацией через RefCell
 pub struct JobSystem {
     config: JobSystemConfig,
-    workers: Vec<JoinHandle<()>>,
+    workers: parking_lot::Mutex<Vec<JoinHandle<()>>>, // Используем Mutex для безопасного доступа
     shutdown: AtomicBool,
     active_workers: AtomicUsize,
     
@@ -185,9 +185,10 @@ impl JobSystem {
         let (job_sender, job_receiver) = bounded(config.queue_size);
         let (result_sender, result_receiver) = bounded(config.queue_size);
         
-        let system = Self {
+        // Создаём систему с пустым вектором workers, который будет заполнен ниже
+        let system = Arc::new(Self {
             config: config.clone(),
-            workers: Vec::new(),
+            workers: parking_lot::Mutex::new(Vec::with_capacity(config.num_threads)),
             shutdown: AtomicBool::new(false),
             active_workers: AtomicUsize::new(0),
             high_priority_queue: Mutex::new(VecDeque::new()),
@@ -200,12 +201,9 @@ impl JobSystem {
             dependency_manager: Arc::new(DependencyManager::new()),
             next_job_id: AtomicUsize::new(0),
             stats: Mutex::new(JobSystemStats::default()),
-        };
+        });
         
         // Запуск рабочих потоков
-        let system = Arc::new(system);
-        let mut workers = Vec::new();
-        
         for i in 0..config.num_threads {
             let sys = Arc::clone(&system);
             let handle = thread::Builder::new()
@@ -215,17 +213,11 @@ impl JobSystem {
                 })
                 .expect("Failed to spawn worker thread");
             
-            workers.push(handle);
+            // Безопасно добавляем handle в mutex
+            system.workers.lock().push(handle);
         }
         
-        // Небезопасно, но необходимо для инициализации
-        unsafe {
-            let ptr = Arc::into_raw(system) as *mut Self;
-            (*ptr).workers = workers;
-            Arc::from_raw(ptr);
-        }
-        
-        system
+        Arc::into_inner(system).expect("Arc should have only one reference at this point")
     }
     
     /// Главный цикл рабочего потока
@@ -424,8 +416,9 @@ impl JobSystem {
     pub fn shutdown(&self) {
         self.shutdown.store(true, Ordering::Relaxed);
         
-        // Ожидание завершения всех потоков
-        for worker in &self.workers {
+        // Ожидание завершения всех потоков через mutex
+        let workers = std::mem::take(&mut *self.workers.lock());
+        for worker in workers {
             let _ = worker.join();
         }
     }
