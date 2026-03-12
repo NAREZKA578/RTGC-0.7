@@ -121,7 +121,7 @@ impl VkDevice {
             let graphics_queue_info = vk::DeviceQueueCreateInfo::builder()
                 .queue_family_index(graphics_queue_family)
                 .queue_priorities(&priorities);
-            queue_create_infos.push(graphysics_queue_info);
+            queue_create_infos.push(graphics_queue_info);
             
             if compute_queue_family != graphics_queue_family {
                 let compute_queue_info = vk::DeviceQueueCreateInfo::builder()

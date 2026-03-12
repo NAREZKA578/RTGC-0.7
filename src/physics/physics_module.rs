@@ -8,6 +8,7 @@ pub mod fracture_component;
 pub mod deformable_terrain;
 pub mod async_physics;
 pub mod advanced_vehicle;
+pub mod helicopter;
 use spatial_hash::SpatialHash;
 use thread_pool::ThreadPool;
 use arena_allocator::ArenaAllocator;
@@ -15,6 +16,7 @@ pub use fracture_component::FractureComponent;
 pub use deformable_terrain::{DeformableTerrainComponent, DeformableTerrainInterface, DeformationType};
 pub use async_physics::AsyncPhysicsEngine;
 pub use advanced_vehicle::{AdvancedVehicle, AdvancedWheel, AdvancedSuspension};
+pub use helicopter::{Helicopter, HelicopterState, MainRotor, TailRotor, TurboshaftEngine, HelicopterControls};
 use tracing;
 
 #[derive(Debug, Clone)]

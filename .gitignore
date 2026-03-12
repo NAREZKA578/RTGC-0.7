@@ -1,5 +1,52 @@
 ```
-/target/
-**/*.rs.bk
- Cargo.lock
+# Compiled and build artifacts
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.a
+*.pyc
+__pycache__/
+*.class
+
+# Dependencies
+node_modules/
+venv/
+.venv/
+target/
+.gradle/
+.mypy_cache/
+.pytest_cache/
+.julia/
+zig*/
+
+# Build directories
+dist/
+build/
+out/
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
+
+# Logs
+*.log
+
+# Coverage
+coverage/
+htmlcov/
+.coverage
+
+# OS
+.DS_Store
+Thumbs.db
 ```

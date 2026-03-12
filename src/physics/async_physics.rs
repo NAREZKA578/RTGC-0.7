@@ -1,4 +1,4 @@
-use crate::physics::RigidBody;
+use crate::physics::{RigidBody, Helicopter};
 use std::sync::Arc;
 use std::thread;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -8,24 +8,29 @@ use std::sync::mpsc::{channel, Sender, Receiver};
 pub enum PhysicsMessage {
     Step { dt: f32, sub_steps: u32 },
     SetBodies(Vec<RigidBody>),
+    SetHelicopter(Helicopter),
     GetBodies,
+    GetHelicopter,
     Shutdown,
 }
 
 /// Ответ от физического потока
 pub enum PhysicsResponse {
     Bodies(Vec<RigidBody>),
+    Helicopter(Helicopter),
     StepComplete,
     ShutdownComplete,
 }
 
-/// Асинхронный физический движок с double buffering
+/// Асинхронный физический движок с double buffering и поддержкой вертолётов
 pub struct AsyncPhysicsEngine {
     sender: Sender<PhysicsMessage>,
     receiver: Receiver<PhysicsResponse>,
     running: Arc<AtomicBool>,
     local_bodies: Vec<RigidBody>,
     pending_bodies: Option<Vec<RigidBody>>,
+    local_helicopter: Option<Helicopter>,
+    pending_helicopter: Option<Helicopter>,
 }
 
 impl AsyncPhysicsEngine {
@@ -38,6 +43,7 @@ impl AsyncPhysicsEngine {
         // Запуск физического потока
         thread::spawn(move || {
             let mut bodies: Vec<RigidBody> = Vec::new();
+            let mut helicopter: Option<Helicopter> = None;
             
             while running_clone.load(Ordering::Relaxed) {
                 match msg_receiver.recv() {
@@ -52,6 +58,11 @@ impl AsyncPhysicsEngine {
                                 body.update(sub_dt);
                             }
                             
+                            // Обновление вертолёта если есть
+                            if let Some(ref mut heli) = helicopter {
+                                heli.update(sub_dt);
+                            }
+                            
                             // Здесь будет collision detection и resolution
                             // пока заглушка
                         }
@@ -64,8 +75,22 @@ impl AsyncPhysicsEngine {
                         let _ = resp_sender.send(PhysicsResponse::StepComplete);
                     }
                     
+                    Ok(PhysicsMessage::SetHelicopter(heli)) => {
+                        helicopter = Some(heli);
+                        let _ = resp_sender.send(PhysicsResponse::StepComplete);
+                    }
+                    
                     Ok(PhysicsMessage::GetBodies) => {
                         let _ = resp_sender.send(PhysicsResponse::Bodies(bodies.clone()));
+                    }
+                    
+                    Ok(PhysicsMessage::GetHelicopter) => {
+                        let response = if let Some(ref heli) = helicopter {
+                            PhysicsResponse::Helicopter(heli.clone())
+                        } else {
+                            PhysicsResponse::StepComplete
+                        };
+                        let _ = resp_sender.send(response);
                     }
                     
                     Ok(PhysicsMessage::Shutdown) => {
@@ -84,6 +109,8 @@ impl AsyncPhysicsEngine {
             running,
             local_bodies: Vec::new(),
             pending_bodies: None,
+            local_helicopter: None,
+            pending_helicopter: None,
         }
     }
     
@@ -92,8 +119,14 @@ impl AsyncPhysicsEngine {
         self.pending_bodies = Some(bodies);
     }
     
+    /// Установить вертолёт для симуляции
+    pub fn set_helicopter(&mut self, helicopter: Helicopter) {
+        self.pending_helicopter = Some(helicopter);
+    }
+    
     /// Синхронизировать локальные данные с потоком
     pub fn sync(&mut self) {
+        // Синхронизация тел
         if let Some(pending) = self.pending_bodies.take() {
             self.local_bodies = pending.clone();
             let _ = self.sender.send(PhysicsMessage::SetBodies(pending));
@@ -102,6 +135,20 @@ impl AsyncPhysicsEngine {
             match self.receiver.try_recv() {
                 Ok(PhysicsResponse::Bodies(bodies)) => {
                     self.local_bodies = bodies;
+                }
+                _ => {}
+            }
+        }
+        
+        // Синхронизация вертолёта
+        if let Some(pending) = self.pending_helicopter.take() {
+            self.local_helicopter = Some(pending.clone());
+            let _ = self.sender.send(PhysicsMessage::SetHelicopter(pending));
+            let _ = self.receiver.recv();
+        } else {
+            match self.receiver.try_recv() {
+                Ok(PhysicsResponse::Helicopter(heli)) => {
+                    self.local_helicopter = Some(heli);
                 }
                 _ => {}
             }
@@ -123,9 +170,24 @@ impl AsyncPhysicsEngine {
         &self.local_bodies
     }
     
+    /// Получить вертолёт
+    pub fn get_helicopter(&self) -> Option<&Helicopter> {
+        self.local_helicopter.as_ref()
+    }
+    
+    /// Получить состояние вертолёта
+    pub fn get_helicopter_state(&self) -> Option<crate::physics::HelicopterState> {
+        self.local_helicopter.as_ref().map(|h| h.get_state())
+    }
+    
     /// Отправить запрос на получение тел из потока
     pub fn request_bodies(&self) {
         let _ = self.sender.send(PhysicsMessage::GetBodies);
+    }
+    
+    /// Отправить запрос на получение вертолёта
+    pub fn request_helicopter(&self) {
+        let _ = self.sender.send(PhysicsMessage::GetHelicopter);
     }
     
     /// Остановить движок
@@ -176,5 +238,35 @@ mod tests {
         assert_eq!(bodies.len(), 1);
         // Тело должно упасть под действием гравитации
         assert!(bodies[0].position.y < 10.0);
+    }
+    
+    #[test]
+    fn test_helicopter_physics() {
+        let mut engine = AsyncPhysicsEngine::new();
+        
+        let heli = Helicopter::new(Vector3::new(0.0, 10.0, 0.0));
+        engine.set_helicopter(heli);
+        engine.sync();
+        
+        assert!(engine.get_helicopter().is_some());
+        
+        // Запуск двигателя и взлёт
+        if let Some(ref mut heli) = engine.local_helicopter {
+            heli.engine.start_engine();
+            heli.controls.collective = 0.6;
+            heli.controls.throttle = 0.9;
+        }
+        engine.sync();
+        
+        engine.step(0.016, 4);
+        engine.wait_for_step();
+        
+        engine.request_helicopter();
+        engine.sync();
+        
+        // Вертолёт должен набирать обороты ротора
+        if let Some(heli) = engine.get_helicopter() {
+            assert!(heli.main_rotor.current_rpm > 0.0);
+        }
     }
 }
