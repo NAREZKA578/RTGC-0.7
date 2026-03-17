@@ -10,8 +10,7 @@ description = "Russian Technological Game Core"
 winit = "0.30"
 raw-window-handle = "0.6"
 
-# Math (можно заменить на свою реализацию)
-glam = "0.28"
+# Math (nalgebra for all linear algebra)
 nalgebra = "0.32"
 
 # DX12 (Windows)

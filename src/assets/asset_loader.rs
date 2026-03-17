@@ -485,7 +485,8 @@ impl AssetManager {
             self.vehicles.insert(vehicle.id.clone(), vehicle);
         }
         
-        Ok(self.vehicles.get(name).unwrap())
+        self.vehicles.get(name)
+            .ok_or_else(|| AssetError::NotFound(format!("Vehicle '{}' not found", name)).into())
     }
     
     pub fn load_game_object(&mut self, name: &str) -> Result<&GameObjectAsset> {
@@ -494,7 +495,8 @@ impl AssetManager {
             self.game_objects.insert(obj.id.clone(), obj);
         }
         
-        Ok(self.game_objects.get(name).unwrap())
+        self.game_objects.get(name)
+            .ok_or_else(|| AssetError::NotFound(format!("Game object '{}' not found", name)).into())
     }
     
     pub fn get_vehicle(&self, id: &str) -> Option<&VehicleAsset> {
@@ -559,8 +561,10 @@ mod tests {
     #[test]
     fn test_vehicle_serialization() {
         let vehicle = VehicleAsset::load_preset(VehiclePreset::KamazTruck);
-        let json = serde_json::to_string_pretty(&vehicle).unwrap();
-        let loaded: VehicleAsset = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string_pretty(&vehicle)
+            .expect("Failed to serialize vehicle");
+        let loaded: VehicleAsset = serde_json::from_str(&json)
+            .expect("Failed to deserialize vehicle");
         assert_eq!(vehicle.id, loaded.id);
         assert_eq!(vehicle.name, loaded.name);
     }
@@ -571,8 +575,10 @@ mod tests {
         obj.transform.position = [1.0, 2.0, 3.0];
         obj.collider = Some(Collider::default());
         
-        let json = serde_json::to_string_pretty(&obj).unwrap();
-        let loaded: GameObjectAsset = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string_pretty(&obj)
+            .expect("Failed to serialize game object");
+        let loaded: GameObjectAsset = serde_json::from_str(&json)
+            .expect("Failed to deserialize game object");
         assert_eq!(obj.id, loaded.id);
         assert_eq!(obj.transform.position, loaded.transform.position);
     }
