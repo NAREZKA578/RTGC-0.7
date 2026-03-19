@@ -407,15 +407,80 @@ impl AssetLoader {
         Ok(AssetData::Config { content })
     }
 
-    /// Loads a 3D model file
+    /// Loads a 3D model file (glTF/GLB)
     fn load_model(&self, path: &Path) -> Result<AssetData, AssetLoadError> {
+        let extension = path.extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
+
+        match extension.to_lowercase().as_str() {
+            "gltf" | "glb" => self.load_gltf(path),
+            _ => Err(AssetLoadError::UnsupportedType(format!("Unknown model format: {}", extension))),
+        }
+    }
+
+    /// Loads a glTF/GLB model file
+    fn load_gltf(&self, path: &Path) -> Result<AssetData, AssetLoadError> {
+        use gltf::{Gltf, buffer::Data};
+        
+        // Read file
         let mut file = File::open(path)?;
         let mut data = Vec::new();
-        file.read_to_end(&mut data)?;
-
-        Ok(AssetData::Model {
-            path: path.to_path_buf(),
-            data,
+        std::io::Read::read_to_end(&mut file, &mut data)?;
+        
+        // Parse glTF
+        let (document, buffers, _images) = gltf::import(path)
+            .map_err(|e| AssetLoadError::DecodeError(format!("Failed to import glTF: {}", e)))?;
+        
+        let mut all_vertices = Vec::new();
+        let mut all_indices = Vec::new();
+        
+        // Iterate through all meshes
+        for mesh in document.meshes() {
+            for primitive in mesh.primitives() {
+                let reader = primitive.reader(|buf| Some(&buffers[buf.index()]));
+                
+                // Read positions
+                let positions: Vec<[f32; 3]> = reader
+                    .read_positions()
+                    .ok_or_else(|| AssetLoadError::InvalidFormat("No positions in mesh".to_string()))?
+                    .collect();
+                
+                // Read normals (or generate defaults)
+                let normals: Vec<[f32; 3]> = reader
+                    .read_normals()
+                    .map(|n| n.collect())
+                    .unwrap_or_else(|| vec![[0.0, 1.0, 0.0]; positions.len()]);
+                
+                // Read UVs (or default to 0,0)
+                let uvs: Vec<[f32; 2]> = reader
+                    .read_tex_coords(0)
+                    .map(|t| t.into_f32().collect())
+                    .unwrap_or_else(|| vec![[0.0, 0.0]; positions.len()]);
+                
+                // Read indices
+                let indices: Vec<u32> = reader
+                    .read_indices()
+                    .map(|i| i.into_u32().collect())
+                    .unwrap_or_else(|| (0..positions.len() as u32).collect());
+                
+                // Build interleaved vertex buffer: pos(3) + normal(3) + uv(2) = 8 floats per vertex
+                let vertices: Vec<f32> = positions.iter()
+                    .zip(normals.iter())
+                    .zip(uvs.iter())
+                    .flat_map(|((p, n), uv)| {
+                        vec![p[0], p[1], p[2], n[0], n[1], n[2], uv[0], uv[1]]
+                    })
+                    .collect();
+                
+                all_vertices.extend(vertices);
+                all_indices.extend(indices);
+            }
+        }
+        
+        Ok(AssetData::Mesh { 
+            vertices: all_vertices, 
+            indices: all_indices 
         })
     }
 }

@@ -224,6 +224,149 @@ impl HudManager {
             ..Default::default()
         }
     }
+
+    /// Рендеринг HUD через OpenGL
+    /// Вызывается из renderer.rs после отрисовки игрового мира
+    pub fn render(&self, renderer: &mut crate::graphics::renderer::Renderer) {
+        if !self.visible || self.last_data.is_none() {
+            return;
+        }
+
+        let data = self.last_data.as_ref().unwrap();
+        let layout = &self.layout;
+
+        let screen_width = renderer.get_width() as f32;
+        let screen_height = renderer.get_height() as f32;
+
+        // === СТИЛЬ: МИНИМАЛИЗМ / ГРЯЗЬ / ХАРДКОР ===
+        // Никаких спидометров и тахометров. Только критическая информация.
+
+        // 1. ИНДИКАТОРЫ ДИФФЕРЕНЦИАЛОВ (Левый верхний угол)
+        // Крупные буквы, горят ярко, когда включены
+        let diff_font_size = 28.0;
+        let start_x = 25.0;
+        let start_y = 25.0;
+        let gap = 45.0;
+
+        // Передний дифф
+        let f_color = if data.diff_front_locked { [1.0, 0.2, 0.2, 1.0] } else { [0.3, 0.3, 0.3, 0.4] };
+        renderer.draw_text("F", start_x, start_y, diff_font_size, f_color);
+        
+        // Центральный дифф
+        let c_color = if data.diff_center_locked { [1.0, 0.8, 0.0, 1.0] } else { [0.3, 0.3, 0.3, 0.4] };
+        renderer.draw_text("C", start_x + gap, start_y, diff_font_size, c_color);
+
+        // Задний дифф
+        let r_color = if data.diff_rear_locked { [1.0, 0.2, 0.2, 1.0] } else { [0.3, 0.3, 0.3, 0.4] };
+        renderer.draw_text("R", start_x + gap * 2.0, start_y, diff_font_size, r_color);
+
+        // Пониженная передача
+        if data.low_range {
+            let low_color = [1.0, 0.6, 0.0, 1.0];
+            renderer.draw_text("LOW", start_x + gap * 0.5, start_y + 35.0, 18.0, low_color);
+        }
+
+        // 2. СТАТУС ЛЕБЁДКИ (Правый верхний угол)
+        if data.winch_active {
+            let winch_x = screen_width - 180.0;
+            let winch_y = 25.0;
+            
+            // Длина троса
+            let rope_len = format!("{:.1}m", data.winch_length_m);
+            renderer.draw_text(&rope_len, winch_x, winch_y, 22.0, [1.0, 0.9, 0.5, 1.0]);
+            
+            // Статус натяжения
+            let tension_status = if data.winch_length_m > 0.5 { "TIGHT" } else { "LOOSE" };
+            let tension_color = if data.winch_length_m > 0.5 { [1.0, 0.3, 0.3, 1.0] } else { [0.5, 0.5, 0.5, 0.8] };
+            renderer.draw_text(tension_status, winch_x, winch_y + 28.0, 16.0, tension_color);
+            
+            // Рамка вокруг лебедки если активна
+            renderer.draw_rect(winch_x - 8.0, winch_y - 8.0, 130.0, 60.0, [0.0, 0.0, 0.0, 0.4]);
+            renderer.draw_rect_border(winch_x - 8.0, winch_y - 8.0, 130.0, 60.0, 2.0, [0.6, 0.6, 0.6, 0.6]);
+        }
+
+        // 3. КОЛЕСА И КОНТАКТ (Нижняя часть экрана, по центру)
+        // 4 точки, показывающие загрузку колес. 
+        // Зеленая = контакт с землей, Красная = в воздухе (вывешено)
+        if layout.show_wheel_status {
+            let wheel_y = screen_height - 70.0;
+            let wheel_spacing = 50.0;
+            let total_w = wheel_spacing * 3.0;
+            let start_wheel_x = (screen_width - total_w) / 2.0;
+
+            for (i, &contact) in data.wheel_contact.iter().enumerate() {
+                let x = start_wheel_x + (i as f32 * wheel_spacing);
+                let color = if contact { [0.0, 1.0, 0.3, 1.0] } else { [1.0, 0.0, 0.0, 0.7] };
+                
+                // Основной индикатор контакта
+                let size = 10.0;
+                renderer.draw_rect(x, wheel_y, size, size, color);
+                
+                // Если колесо в воздухе, добавляем вторую точку ниже (индикатор хода подвески)
+                if !contact {
+                    renderer.draw_rect(x, wheel_y + 16.0, size, size, [0.4, 0.4, 0.4, 0.6]);
+                }
+                
+                // Мигание при сильном проскальзывании
+                if data.wheel_slip.get(i).copied().unwrap_or(0.0) > 0.4 {
+                    let slip_color = [1.0, 1.0, 0.0, 0.8];
+                    renderer.draw_rect(x + 2.0, wheel_y + 2.0, size - 4.0, size - 4.0, slip_color);
+                }
+            }
+        }
+
+        // 4. ПОДСКАЗКИ УПРАВЛЕНИЯ (Внизу по центру, полупрозрачные)
+        let hints_y = screen_height - 40.0;
+        let hint_color = [0.5, 0.5, 0.5, 0.7];
+        let font_size = 13.0;
+        
+        let hint_text = "[WASD] Drive  [SHIFT] Winch  [B] Diff Locks  [ESC] Menu";
+        let text_w = hint_text.len() as f32 * font_size * 0.55;
+        let hint_x = (screen_width - text_w) / 2.0;
+        
+        renderer.draw_text(hint_text, hint_x, hints_y, font_size, hint_color);
+
+        // 5. ИНДИКАТОР ПОВРЕЖДЕНИЙ (Оверлей по краям экрана)
+        // Если здоровье машины < 100%, рисуем красную виньетку по краям
+        if data.vehicle_health < 1.0 {
+            let damage_factor = 1.0 - data.vehicle_health;
+            let alpha = (damage_factor * 0.6).min(0.75);
+            
+            let border_size = 35.0 * (1.0 + damage_factor * 1.5);
+            
+            // Top
+            renderer.draw_rect(0.0, 0.0, screen_width, border_size, [1.0, 0.0, 0.0, alpha]);
+            // Bottom
+            renderer.draw_rect(0.0, screen_height - border_size, screen_width, border_size, [1.0, 0.0, 0.0, alpha]);
+            // Left
+            renderer.draw_rect(0.0, 0.0, border_size, screen_height, [1.0, 0.0, 0.0, alpha]);
+            // Right
+            renderer.draw_rect(screen_width - border_size, 0.0, border_size, screen_height, [1.0, 0.0, 0.0, alpha]);
+            
+            // Текст предупреждения если критично
+            if data.vehicle_health < 0.25 {
+                let warn_text = "CRITICAL DAMAGE";
+                let warn_x = (screen_width - 180.0) / 2.0;
+                let warn_y = screen_height / 2.0 - 80.0;
+                renderer.draw_text(warn_text, warn_x, warn_y, 32.0, [1.0, 0.0, 0.0, 1.0]);
+            }
+        }
+
+        // 6. СТАТУС ГРУЗА (Левая сторона, ниже диффов)
+        if layout.show_cargo && data.cargo_attached {
+            let cargo_x = 25.0;
+            let cargo_y = 120.0;
+            
+            let weight_text = format!("{:.0} kg", data.cargo_weight_kg);
+            renderer.draw_text(&weight_text, cargo_x, cargo_y, 20.0, [0.9, 0.9, 0.9, 0.9]);
+            
+            // Повреждение груза
+            if data.cargo_damage > 0.3 {
+                let damage_color = if data.cargo_damage > 0.7 { [1.0, 0.0, 0.0, 1.0] } else { [1.0, 0.5, 0.0, 1.0] };
+                renderer.draw_text("DAMAGED", cargo_x, cargo_y + 25.0, 16.0, damage_color);
+            }
+        }
+    }
 }
 
 impl Default for HudManager {

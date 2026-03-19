@@ -1,43 +1,42 @@
-```rust
 # Compiled and build artifacts
+*.pyc
+__pycache__/
 *.o
 *.obj
-*.a
-*.lib
+*.class
+*.exe
 *.dll
 *.so
-*.dylib
-target/
-
+*.a
+*.out
 # Dependencies
-Cargo.lock
-**/vendor/
-**/deps/
-
+.venv/
+venv/
+node_modules/
+dist/
+build/
+target/
+.mypy_cache/
+.pytest_cache/
+.coverage
 # Logs and temp files
 *.log
 *.tmp
-
-# Editors
-.vscode/
-.idea/
 *.swp
 *.swo
-
 # Environment
 .env
 .env.local
 *.env.*
-
+# Editors
+.vscode/
+.idea/
 # Coverage
 coverage/
 htmlcov/
-*.coverage
-
-# OS
+# System files
 .DS_Store
 Thumbs.db
-
 # Compressed files
 *.zip
 *.gz
@@ -61,4 +60,3 @@ Thumbs.db
 *.tar.bz2
 *.tar.xz
 *.tar.zst
-```

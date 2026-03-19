@@ -1,9 +1,15 @@
-//! Audio engine based on cpal
+//! Audio engine based on cpal and symphonia for decoding
 
 use std::sync::Arc;
+use std::collections::HashMap;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Sample, SampleFormat, Stream};
 use nalgebra::Vector3;
+use symphonia::core::codecs::DecoderOptions;
+use symphonia::core::formats::FormatOptions;
+use symphonia::core::io::MediaSourceStream;
+use symphonia::core::meta::MetadataOptions;
+use symphonia::core::probe::Hint;
 
 /// Audio configuration
 #[derive(Debug, Clone)]
@@ -26,10 +32,18 @@ impl Default for AudioConfig {
 }
 
 /// Sound source handle
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SoundHandle(u32);
 
-/// Audio source parameters
+/// Loaded sound data (decoded samples)
+#[derive(Clone)]
+pub struct LoadedSound {
+    pub samples: Vec<f32>,
+    pub sample_rate: u32,
+    pub channels: u16,
+}
+
+/// Sound source parameters
 #[derive(Debug, Clone)]
 pub struct AudioSource {
     pub position: Vector3<f32>,
@@ -39,6 +53,7 @@ pub struct AudioSource {
     pub is_looping: bool,
     pub max_distance: f32,
     pub rolloff_factor: f32,
+    pub sound_handle: Option<SoundHandle>,
 }
 
 impl Default for AudioSource {
@@ -51,6 +66,7 @@ impl Default for AudioSource {
             is_looping: false,
             max_distance: 100.0,
             rolloff_factor: 1.0,
+            sound_handle: None,
         }
     }
 }
@@ -59,12 +75,16 @@ impl Default for AudioSource {
 struct AudioStreamData {
     stream: Stream,
     is_playing: bool,
+    samples: Vec<f32>,
+    sample_pos: usize,
+    is_looping: bool,
 }
 
 /// Audio engine
 pub struct AudioEngine {
     config: AudioConfig,
     sources: Vec<(SoundHandle, AudioSource, Option<AudioStreamData>)>,
+    loaded_sounds: HashMap<SoundHandle, LoadedSound>,
     next_handle_id: u32,
     host: cpal::Host,
     device: cpal::Device,
@@ -101,6 +121,123 @@ impl AudioEngine {
         let mut engine = Self::new()?;
         engine.config = config;
         Ok(engine)
+    }
+
+    /// Loads a sound from file (OGG/MP3/FLAC via symphonia)
+    pub fn load_sound(&mut self, path: &str) -> Result<SoundHandle, String> {
+        use std::fs::File;
+        use std::io::BufReader;
+        use symphonia::core::source::Source;
+        
+        // Open file
+        let file = File::open(path)
+            .map_err(|e| format!("Failed to open file {}: {}", path, e))?;
+        let buf_reader = BufReader::new(file);
+        
+        // Create media source stream
+        let mss = MediaSourceStream::new(Box::new(buf_reader));
+        
+        // Probe format
+        let hint = Hint::new();
+        let format_opts = FormatOptions::default();
+        let registry = symphonia::default::get_codecs();
+        let probe = symphonia::default::get_probe();
+        
+        let format = probe
+            .read(&hint, mss, &format_opts)
+            .map_err(|e| format!("Failed to probe format: {}", e))?
+            .format;
+        
+        // Find first audio track
+        let track_id = format
+            .tracks()
+            .iter()
+            .find(|t| t.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL)
+            .map(|t| t.id)
+            .ok_or_else(|| "No audio track found".to_string())?;
+        
+        // Create decoder
+        let track = format
+            .tracks()
+            .iter()
+            .find(|t| t.id == track_id)
+            .unwrap();
+        
+        let codec_params = &track.codec_params;
+        let decoder = registry
+            .make(codec_params)
+            .map_err(|e| format!("Failed to create decoder: {}", e))?;
+        
+        // Decode all samples
+        let mut samples = Vec::new();
+        let sample_rate = codec_params.sample_rate.unwrap_or(44100);
+        let channels = codec_params.channels.map(|c| c.count()).unwrap_or(2) as u16;
+        
+        while let Ok(packet) = format.next_packet() {
+            if packet.track_id() != track_id {
+                continue;
+            }
+            
+            match decoder.decode(&packet) {
+                Ok(decoded) => {
+                    let spec = decoded.spec().unwrap();
+                    let buf = decoded.buf();
+                    
+                    for frame in buf.iter() {
+                        for sample in frame.iter() {
+                            // Convert to f32 [-1.0, 1.0]
+                            let normalized = *sample as f32 / i16::MAX as f32;
+                            samples.push(normalized);
+                        }
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        
+        let handle = SoundHandle(self.next_handle_id);
+        self.next_handle_id += 1;
+        
+        self.loaded_sounds.insert(handle, LoadedSound {
+            samples,
+            sample_rate,
+            channels,
+        });
+        
+        Ok(handle)
+    }
+
+    /// Plays a loaded sound and returns a source handle
+    pub fn play_loaded_sound(&mut self, sound_handle: SoundHandle, source: AudioSource) -> SoundHandle {
+        if !self.loaded_sounds.contains_key(&sound_handle) {
+            return sound_handle; // Return original as error indicator
+        }
+        
+        let handle = SoundHandle(self.next_handle_id);
+        self.next_handle_id += 1;
+        
+        let mut source = source;
+        source.sound_handle = Some(sound_handle);
+        self.sources.push((handle, source, None));
+        handle
+    }
+
+    /// Sets the pitch of a sound source (for engine RPM effect)
+    pub fn set_pitch(&mut self, handle: SoundHandle, pitch: f32) {
+        if let Some((_, source, _)) = self.sources.iter_mut().find(|(h, _, _)| *h == handle) {
+            source.pitch = pitch.clamp(0.5, 2.0);
+        }
+    }
+
+    /// Updates engine sound based on RPM
+    pub fn update_engine_sound(
+        &mut self,
+        handle: SoundHandle,
+        rpm: f32,
+        max_rpm: f32
+    ) {
+        let pitch = 0.5 + (rpm / max_rpm) * 1.5; // pitch 0.5..2.0
+        self.set_pitch(handle, pitch);
     }
 
     /// Plays a sound and returns a handle

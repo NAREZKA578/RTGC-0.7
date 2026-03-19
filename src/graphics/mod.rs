@@ -11,6 +11,8 @@ pub mod texture_streaming;
 pub mod lighting;
 pub mod rhi;
 pub mod material;
+pub mod particles;
+pub mod debug_renderer;
 
 pub use renderer::{Renderer, MenuState};
 pub use camera::Camera;
