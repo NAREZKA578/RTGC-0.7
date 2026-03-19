@@ -210,6 +210,8 @@ impl EcsWorld {
         
         // Безопасно: мы не модифицируем данные во время итерации
         entities_with_component.into_iter().map(move |(entity, ptr)| {
+            // SAFETY: ptr получен из Vec и валиден пока Vec не изменяется в этом scope.
+            // Мы уже собрали все указатели до начала итерации, поэтому они остаются валидными.
             unsafe { (entity, &*ptr) }
         })
     }
@@ -255,6 +257,8 @@ impl ArchetypeStorage {
         let (ptr, type_id) = self.data;
         assert!(type_id == TypeId::of::<T>(), "Type mismatch");
         
+        // SAFETY: ptr был создан из Box<Archetype<T>> с тем же типом T в new::<T>().
+        // Тип проверяется через type_id перед использованием, поэтому приведение корректно.
         unsafe {
             let archetype = &mut *(ptr as *mut Archetype<T>);
             archetype.allocate(component)
@@ -272,6 +276,8 @@ impl ArchetypeStorage {
             return None;
         }
         
+        // SAFETY: ptr был создан из Box<Archetype<T>> с тем же типом T в new::<T>().
+        // type_id проверен выше, поэтому приведение типа корректно.
         unsafe {
             let archetype = &*(ptr as *const Archetype<T>);
             archetype.get(index)
@@ -284,6 +290,8 @@ impl ArchetypeStorage {
             return None;
         }
         
+        // SAFETY: ptr был создан из Box<Archetype<T>> с тем же типом T в new::<T>().
+        // type_id проверен выше, поэтому приведение типа корректно.
         unsafe {
             let archetype = &mut *(ptr as *mut Archetype<T>);
             archetype.get_mut(index)

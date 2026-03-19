@@ -16,6 +16,7 @@ pub fn init_logger() {
         .with_line_number(false)
         .with_level(true)
         .with_timer(fmt::time::SystemTime::default())
+        .with_env_filter(filter)
         .finish()
         .init();
     

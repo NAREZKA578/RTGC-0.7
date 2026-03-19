@@ -234,18 +234,19 @@ pub struct MissionSaveManager {
 }
 
 impl MissionSaveManager {
-    pub fn new(save_directory: PathBuf) -> Self {
+    pub fn new(save_directory: PathBuf) -> Result<Self, String> {
         // Create save directory if it doesn't exist
         if !save_directory.exists() {
-            fs::create_dir_all(&save_directory).expect("Failed to create save directory");
+            fs::create_dir_all(&save_directory)
+                .map_err(|e| format!("Cannot create save dir: {}", e))?;
         }
         
-        Self {
+        Ok(Self {
             save_directory,
             max_save_slots: 10,
             autosave_interval_seconds: 300.0, // 5 minutes
             last_autosave_time: 0.0,
-        }
+        })
     }
     
     /// Create a new save game
@@ -451,7 +452,7 @@ mod tests {
     #[test]
     fn test_save_load_cycle() {
         let temp_dir = tempdir().unwrap();
-        let manager = MissionSaveManager::new(temp_dir.path().to_path_buf());
+        let manager = MissionSaveManager::new(temp_dir.path().to_path_buf()).unwrap();
         
         let player = PlayerProgress {
             player_id: "player1".to_string(),

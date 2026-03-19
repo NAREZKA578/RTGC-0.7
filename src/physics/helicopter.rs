@@ -826,22 +826,15 @@ impl Helicopter {
         let angular_acceleration = self.inertia_tensor.try_inverse().unwrap_or(Matrix3::zeros()) * torques;
         self.angular_velocity += angular_acceleration * dt;
         
-        // Обновление ориентации через кватернионы
-        let q = self.rotation;
-        let w = self.angular_velocity;
-        let dq = UnitQuaternion::from_quaternion(Quaternion::new(
-            0.0,
-            w.x * 0.5,
-            w.y * 0.5,
-            w.z * 0.5,
-        )) * q;
-        
-        self.rotation = UnitQuaternion::from_quaternion(Quaternion::new(
-            q.w + dq.w * dt,
-            q.i + dq.i * dt,
-            q.j + dq.j * dt,
-            q.k + dq.k * dt,
-        )).normalize();
+        // Обновление ориентации через exponential map (стандарт для игровых движков)
+        let angle = self.angular_velocity.magnitude() * dt;
+        if angle > 1e-6 {
+            let axis = nalgebra::Unit::new_normalize(self.angular_velocity);
+            let delta_rotation = UnitQuaternion::from_axis_angle(&axis, angle);
+            self.rotation = delta_rotation * self.rotation;
+            // Ренормализация для предотвращения накопления ошибок
+            self.rotation.renormalize();
+        }
         
         // Проверка контакта с землёй
         self.is_on_ground = self.position.y < 0.5;

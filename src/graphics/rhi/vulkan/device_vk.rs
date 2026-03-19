@@ -110,21 +110,21 @@ impl VkDevice {
             
             let mut enabled_layers = Vec::new();
             let mut enabled_extensions = vec![
-                cstr!(ash::extensions::khr::Surface::NAME).as_ptr(),
+                b"VK_KHR_surface\0".as_ptr() as *const i8,
             ];
             
             #[cfg(target_os = "windows")]
-            enabled_extensions.push(cstr!(ash::extensions::khr::Win32Surface::NAME).as_ptr());
+            enabled_extensions.push(b"VK_KHR_win32_surface\0".as_ptr() as *const i8);
             
             #[cfg(target_os = "linux")]
-            enabled_extensions.push(cstr!(ash::extensions::khr::XlibSurface::NAME).as_ptr());
+            enabled_extensions.push(b"VK_KHR_xlib_surface\0".as_ptr() as *const i8);
             
             #[cfg(target_os = "macos")]
-            enabled_extensions.push(cstr!(ash::extensions::mvk::MacOSSurface::NAME).as_ptr());
+            enabled_extensions.push(b"VK_MVK_macos_surface\0".as_ptr() as *const i8);
             
             if enable_validation {
                 enabled_layers.push(cstr!("VK_LAYER_KHRONOS_validation").as_ptr());
-                enabled_extensions.push(cstr!(ash::extensions::ext::DebugUtils::NAME).as_ptr());
+                enabled_extensions.push(b"VK_EXT_debug_utils\0".as_ptr() as *const i8);
             }
             
             let create_info = vk::InstanceCreateInfo::builder()
@@ -194,12 +194,12 @@ impl VkDevice {
                     .build());
             
             let mut enabled_extensions = vec![
-                cstr!(ash::extensions::khr::Swapchain::NAME).as_ptr(),
-                cstr!(ash::extensions::ext::ExtendedDynamicState::NAME).as_ptr(),
+                b"VK_KHR_swapchain\0".as_ptr() as *const i8,
+                b"VK_EXT_extended_dynamic_state\0".as_ptr() as *const i8,
             ];
             
             // Enable occlusion query extension for GPU occlusion culling
-            enabled_extensions.push(cstr!(ash::extensions::khr::GetPhysicalDeviceProperties2::NAME).as_ptr());
+            enabled_extensions.push(b"VK_KHR_get_physical_device_properties2\0".as_ptr() as *const i8);
             
             let device_info = vk::DeviceCreateInfo::builder()
                 .queue_create_infos(&queue_create_infos)
@@ -734,9 +734,9 @@ impl IDevice for VkDevice {
             // Create surface based on platform
             #[cfg(target_os = "windows")]
             let surface = unsafe {
-                use ash::extensions::khr::Win32Surface;
+                use ash::khr::win32_surface;
                 
-                let win32_surface = Win32Surface::new(&self.entry, &self.instance);
+                let win32_surface = win32_surface::Win32Surface::new(&self.entry, &self.instance);
                 
                 let surface_info = vk::Win32SurfaceCreateInfoKHR::builder()
                     .hwnd(window_handle)
@@ -747,9 +747,9 @@ impl IDevice for VkDevice {
             
             #[cfg(target_os = "linux")]
             let surface = unsafe {
-                use ash::extensions::khr::XlibSurface;
+                use ash::khr::xlib_surface;
                 
-                let xlib_surface = XlibSurface::new(&self.entry, &self.instance);
+                let xlib_surface = xlib_surface::XlibSurface::new(&self.entry, &self.instance);
                 
                 let surface_info = vk::XlibSurfaceCreateInfoKHR::builder()
                     .window(window_handle as u64)

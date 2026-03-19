@@ -773,13 +773,14 @@ impl PhysicsWorld {
         // FIXED: Process contacts sequentially to avoid data races
         // TODO: Implement proper parallel contact resolution with disjoint sets
         tracing::trace!("Processing {} contacts sequentially (safe mode)", contacts.len());
+        let bodies_slice = self.rigid_bodies.as_mut_slice();
         for contact in &contacts {
-            self.resolve_contact_sequential(contact, self.rigid_bodies.as_mut_slice());
+            Self::resolve_contact_sequential(contact, bodies_slice);
         }
         tracing::trace!("Completed processing contacts");
     }
 
-    fn resolve_contact_sequential(&self, contact: &Contact, bodies: &mut [Option<RigidBody>]) {
+    fn resolve_contact_sequential(contact: &Contact, bodies: &mut [Option<RigidBody>]) {
         // Get mutable references to both bodies involved in the contact
         if let (Some(ref mut body_a), Some(ref mut body_b)) = (
             bodies.get_mut(contact.body_a).and_then(|b| b.as_mut()),

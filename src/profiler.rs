@@ -77,8 +77,8 @@ impl Profiler {
     }
 }
 
-// Global profiler instance using lazy_static
-use std::sync::Mutex;
+// Global profiler instance using parking_lot::Mutex (does not poison on panic)
+use parking_lot::Mutex;
 use once_cell::sync::Lazy;
 
 pub static PROFILER: Lazy<Mutex<Profiler>> = Lazy::new(|| Mutex::new(Profiler::new()));
@@ -87,33 +87,33 @@ pub static PROFILER: Lazy<Mutex<Profiler>> = Lazy::new(|| Mutex::new(Profiler::n
 macro_rules! profile_scope {
     ($name:expr, $block:block) => {{
         use crate::profiler::PROFILER;
-        PROFILER.lock().unwrap().start_timer($name);
+        PROFILER.lock().start_timer($name);
         let result = $block;
-        PROFILER.lock().unwrap().stop_timer($name);
+        PROFILER.lock().stop_timer($name);
         result
     }};
 }
 
 pub fn start_timer(name: &str) {
-    PROFILER.lock().unwrap().start_timer(name);
+    PROFILER.lock().start_timer(name);
 }
 
 pub fn stop_timer(name: &str) -> Option<f64> {
-    PROFILER.lock().unwrap().stop_timer(name)
+    PROFILER.lock().stop_timer(name)
 }
 
 pub fn get_average_time(name: &str) -> Option<f64> {
-    PROFILER.lock().unwrap().get_average_time(name)
+    PROFILER.lock().get_average_time(name)
 }
 
 pub fn get_last_time(name: &str) -> Option<f64> {
-    PROFILER.lock().unwrap().get_last_time(name)
+    PROFILER.lock().get_last_time(name)
 }
 
 pub fn print_profile_report() {
-    PROFILER.lock().unwrap().print_profile_report();
+    PROFILER.lock().print_profile_report();
 }
 
 pub fn reset_profiler() {
-    PROFILER.lock().unwrap().reset();
+    PROFILER.lock().reset();
 }
