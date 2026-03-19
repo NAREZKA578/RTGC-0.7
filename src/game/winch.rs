@@ -1,5 +1,5 @@
 use nalgebra::Vector3;
-use crate::physics::{PhysicsWorld, SpringConstraint};
+use crate::physics::{PhysicsWorld, SpringConstraint, Ray};
 
 /// Лебёдка — устройство для подтягивания объектов тросом
 pub struct Winch {
@@ -27,21 +27,19 @@ impl Winch {
         }
     }
 
-    /// Выстрелить тросом в направлении
+    /// Выстрелить тросом в направлении - использует physics.raycast()
     pub fn shoot(&mut self, origin: Vector3<f32>, direction: Vector3<f32>, physics_world: &PhysicsWorld) -> bool {
-        // Raycast вперед
-        let ray_end = origin + direction.normalize() * self.max_length;
+        // Создаем луч для raycast
+        let ray = Ray {
+            origin,
+            direction: direction.normalize(),
+        };
         
-        // Упрощенный raycast (в реальной версии нужно использовать physics.raycast)
-        // Здесь просто проверяем расстояние до "земли" (y=0)
-        let dir_norm = direction.normalize();
-        if dir_norm.y < -0.1 {
-            // Направлен вниз, может попасть в землю
-            let t = -origin.y / dir_norm.y;
-            if t > 0.0 && t < self.max_length {
-                let hit_point = origin + dir_norm * t;
-                self.target_point = Some(hit_point);
-                self.current_length = t;
+        // Используем настоящий raycast из physics world
+        if let Some(hit) = physics_world.raycast(&ray) {
+            if hit.distance <= self.max_length {
+                self.target_point = Some(hit.point);
+                self.current_length = hit.distance;
                 self.is_active = true;
                 return true;
             }

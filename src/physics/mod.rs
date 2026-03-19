@@ -13,7 +13,9 @@ pub mod vehicle;
 pub mod deformable_terrain;
 pub mod constraints;
 
-pub use physics_module::{PhysicsWorld, RigidBody, Collider, PhysicsConfig};
+// Re-export collision layer constants
+pub use physics_module::{LAYER_WORLD, LAYER_VEHICLE, LAYER_CARGO, LAYER_TRIGGER};
+pub use physics_module::{PhysicsWorld, RigidBody, Ray, RaycastHit};
 pub use arena_allocator::ArenaAllocator;
 pub use spatial_hash::SpatialHash;
 pub use async_physics::AsyncPhysicsEngine;
@@ -22,5 +24,5 @@ pub use fracture_component::FractureComponent;
 pub use helicopter::{Helicopter, HelicopterConfig, HelicopterControls};
 pub use advanced_vehicle::AdvancedVehicle;
 pub use vehicle::Vehicle;
-pub use deformable_terrain::DeformableTerrain;
+pub use deformable_terrain::DeformableTerrainComponent;
 pub use constraints::{SpringConstraint, RaycastSuspension};
