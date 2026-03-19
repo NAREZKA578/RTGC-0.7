@@ -37,6 +37,12 @@ pub struct Renderer {
     height: u32,
     // HUD Manager reference for rendering
     hud_data: Option<crate::ui::hud::VehicleHudData>,
+    // SPRINT 5: Weather and Day/Night cycle support
+    sky_color_top: Vector3<f32>,
+    sky_color_horizon: Vector3<f32>,
+    sun_direction: Vector3<f32>,
+    ambient_intensity: f32,
+    vehicle_lights_enabled: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -142,6 +148,12 @@ impl Renderer {
             vehicle_box_mesh: None,
             vehicle_transform: None,
             hud_data: None,
+            // SPRINT 5: Weather and Day/Night defaults
+            sky_color_top: Vector3::new(0.4, 0.6, 0.9),
+            sky_color_horizon: Vector3::new(0.7, 0.8, 0.9),
+            sun_direction: Vector3::y(),
+            ambient_intensity: 0.5,
+            vehicle_lights_enabled: false,
         })
     }
     
@@ -159,7 +171,25 @@ impl Renderer {
     pub fn set_hud_data(&mut self, data: crate::ui::hud::VehicleHudData) {
         self.hud_data = Some(data);
     }
-    
+
+    // SPRINT 5: Weather and Day/Night cycle methods
+    pub fn set_sky_color(&mut self, top: Vector3<f32>, horizon: Vector3<f32>) {
+        self.sky_color_top = top;
+        self.sky_color_horizon = horizon;
+    }
+
+    pub fn set_sun_direction(&mut self, dir: Vector3<f32>) {
+        self.sun_direction = dir;
+    }
+
+    pub fn set_ambient_intensity(&mut self, intensity: f32) {
+        self.ambient_intensity = intensity.clamp(0.0, 1.0);
+    }
+
+    pub fn enable_vehicle_lights(&mut self, enable: bool) {
+        self.vehicle_lights_enabled = enable;
+    }
+
     /// Create a simple box mesh for the vehicle (temporary until GLTF loading works)
     pub fn create_vehicle_box_mesh(&mut self, half_extents: Vector3<f32>) -> Result<(), Box<dyn std::error::Error>> {
         // Create a unit cube centered at origin, scaled by half_extents
@@ -216,7 +246,13 @@ impl Renderer {
     
     pub fn render(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         unsafe {
-            self.gl.clear_color(0.1, 0.2, 0.3, 1.0);
+            // SPRINT 5: Clear with sky gradient color (using top color for now)
+            self.gl.clear_color(
+                self.sky_color_top.x,
+                self.sky_color_top.y,
+                self.sky_color_top.z,
+                1.0
+            );
             self.gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
         }
 
@@ -284,14 +320,19 @@ impl Renderer {
             if let Some(u_view) = self.gl.get_uniform_location(self.shader.program, "u_view") {
                 self.gl.uniform_matrix_4_f32_slice(Some(&u_view), false, view.as_slice());
             }
+            // SPRINT 5: Light position from sun direction (scaled for shader)
             if let Some(u_light_pos) = self.gl.get_uniform_location(self.shader.program, "u_light_pos") {
-                self.gl.uniform_3_f32(Some(&u_light_pos), 5.0, 5.0, 5.0);
+                let light_pos = self.sun_direction * 100.0;
+                self.gl.uniform_3_f32(Some(&u_light_pos), light_pos.x, light_pos.y, light_pos.z);
             }
             if let Some(u_view_pos) = self.gl.get_uniform_location(self.shader.program, "u_view_pos") {
                 self.gl.uniform_3_f32(Some(&u_view_pos), self.camera.position.x, self.camera.position.y, self.camera.position.z);
             }
+            // SPRINT 5: Light color affected by ambient intensity and weather
             if let Some(u_light_color) = self.gl.get_uniform_location(self.shader.program, "u_light_color") {
-                self.gl.uniform_3_f32(Some(&u_light_color), 1.0, 1.0, 1.0);
+                let light_intensity = self.ambient_intensity;
+                self.gl.uniform_3_f32(Some(&u_light_color), 
+                    light_intensity, light_intensity, light_intensity * 1.1);
             }
         }
         
