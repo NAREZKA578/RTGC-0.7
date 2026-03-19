@@ -62,6 +62,52 @@ impl Mesh {
         }
     }
     
+    /// Create a mesh from raw float data (positions, normals, texcoords interleaved)
+    pub fn new_raw(gl: &Context, vertices: &[f32], indices: &[u32]) -> Result<Self, Box<dyn std::error::Error>> {
+        let gl = Rc::new(gl.clone());
+        
+        unsafe {
+            let vao = gl.create_vertex_array()?;
+            gl.bind_vertex_array(Some(vao));
+            
+            let vbo = gl.create_buffer()?;
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(vbo));
+            gl.buffer_data_u8_slice(
+                glow::ARRAY_BUFFER,
+                bytemuck::cast_slice(vertices),
+                glow::STATIC_DRAW,
+            );
+            
+            let ebo = gl.create_buffer()?;
+            gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(ebo));
+            gl.buffer_data_u8_slice(
+                glow::ELEMENT_ARRAY_BUFFER,
+                bytemuck::cast_slice(indices),
+                glow::STATIC_DRAW,
+            );
+            
+            // Position attribute (location 0) - 3 floats, stride 32 bytes
+            gl.enable_vertex_attrib_array(0);
+            gl.vertex_attrib_pointer_f32(0, 3, glow::FLOAT, false, 32, 0);
+            
+            // Normal attribute (location 1) - 3 floats, stride 32 bytes, offset 12
+            gl.enable_vertex_attrib_array(1);
+            gl.vertex_attrib_pointer_f32(1, 3, glow::FLOAT, false, 32, 12);
+            
+            // TexCoord attribute (location 2) - 2 floats, stride 32 bytes, offset 24
+            gl.enable_vertex_attrib_array(2);
+            gl.vertex_attrib_pointer_f32(2, 2, glow::FLOAT, false, 32, 24);
+            
+            Ok(Mesh {
+                gl,
+                vao,
+                vbo,
+                ebo,
+                indices_count: indices.len() as i32,
+            })
+        }
+    }
+    
     pub fn draw(&self) {
         unsafe {
             self.gl.bind_vertex_array(Some(self.vao));

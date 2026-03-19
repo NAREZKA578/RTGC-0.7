@@ -1,42 +1,51 @@
-# Compiled and build artifacts
+```
+# Rust build artifacts
+target/
+
+# Dependencies
+Cargo.lock
+
+# Compiled files
+*.rs.bk
 *.pyc
-__pycache__/
+*.class
 *.o
 *.obj
-*.class
 *.exe
 *.dll
 *.so
 *.a
 *.out
-# Dependencies
-.venv/
-venv/
+
+# Dependency directories
 node_modules/
-dist/
-build/
-target/
+venv/
+.venv/
+__pycache__/
 .mypy_cache/
 .pytest_cache/
-.coverage
-# Logs and temp files
-*.log
-*.tmp
-*.swp
-*.swo
-# Environment
-.env
-.env.local
-*.env.*
-# Editors
+.gradle/
+
+# Editor/IDE files
 .vscode/
 .idea/
-# Coverage
-coverage/
-htmlcov/
+*.swp
+*.swo
+*.tmp
+
 # System files
 .DS_Store
 Thumbs.db
+.env
+.env.local
+*.env.*
+
+# Logs and coverage
+*.log
+coverage/
+htmlcov/
+.coverage
+
 # Compressed files
 *.zip
 *.gz
@@ -60,3 +69,4 @@ Thumbs.db
 *.tar.bz2
 *.tar.xz
 *.tar.zst
+```

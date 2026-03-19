@@ -6,7 +6,7 @@ pub mod weather;
 pub mod cargo;
 pub mod winch;
 
-pub use mission_save::{MissionSave, WorldState, TriggerZone, ZoneType};
+pub use mission_save::{SaveGame, MissionSaveManager};
 pub use weather::{WeatherSystem, WeatherState, DayNightCycle, PrecipitationType};
 pub use cargo::Cargo;
 pub use winch::Winch;

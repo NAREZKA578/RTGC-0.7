@@ -240,7 +240,7 @@ impl Renderer {
             20, 21, 22, 20, 22, 23, // Left
         ];
         
-        self.vehicle_box_mesh = Some(Mesh::new(&self.gl, &vertices, &indices)?);
+        self.vehicle_box_mesh = Some(Mesh::new_raw(&self.gl, &vertices, &indices)?);
         Ok(())
     }
     
@@ -457,12 +457,16 @@ impl Renderer {
         Ok(())
     }
     
-    /// Draw a 2D rectangle (simple quad)
+    /// Draw a 2D rectangle (simple quad) with proper VAO/VBO implementation
     unsafe fn draw_rect(&self, x: f32, y: f32, width: f32, height: f32, color: [f32; 4]) {
-        // Simple HUD rect drawing using triangle fan
-        // This is a placeholder - full implementation needs proper VAO/VBO setup
-        // For now we use a simple approach with pre-defined quad vertices
+        // Create orthographic projection for UI
+        let ortho = Matrix4::new_orthographic(
+            0.0, self.width as f32,
+            0.0, self.height as f32,
+            -1.0, 1.0
+        );
         
+        // Set up vertices for a quad (2 triangles)
         let vertices: [f32; 16] = [
             x, y,                    // bottom-left
             x + width, y,            // bottom-right
@@ -470,8 +474,47 @@ impl Renderer {
             x, y + height,           // top-left
         ];
         
-        // In full implementation: bind UI shader, set ortho projection, draw quad
-        // For Sprint 1 alpha: stub implementation
+        let indices: [u32; 6] = [
+            0, 1, 2,
+            0, 2, 3,
+        ];
+        
+        // Create temporary VAO/VBO for the rect
+        let vao = self.gl.create_vertex_array().unwrap_or(0);
+        let vbo = self.gl.create_buffer().unwrap_or(0);
+        let ebo = self.gl.create_buffer().unwrap_or(0);
+        
+        if vao == 0 || vbo == 0 || ebo == 0 {
+            return; // Failed to create buffers
+        }
+        
+        self.gl.bind_vertex_array(Some(vao));
+        
+        self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(vbo));
+        self.gl.buffer_data_u8_slice(
+            glow::ARRAY_BUFFER,
+            bytemuck::cast_slice(&vertices),
+            glow::STREAM_DRAW,
+        );
+        
+        self.gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(ebo));
+        self.gl.buffer_data_u8_slice(
+            glow::ELEMENT_ARRAY_BUFFER,
+            bytemuck::cast_slice(&indices),
+            glow::STREAM_DRAW,
+        );
+        
+        // Position attribute (location 0) - 2 floats per vertex
+        self.gl.enable_vertex_attrib_array(0);
+        self.gl.vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, 8, 0);
+        
+        // Draw the quad
+        self.gl.draw_elements(glow::TRIANGLES, 6, glow::UNSIGNED_INT, 0);
+        
+        // Cleanup
+        self.gl.delete_vertex_array(vao);
+        self.gl.delete_buffer(vbo);
+        self.gl.delete_buffer(ebo);
     }
     
     /// Draw a 2D triangle (for minimap player icon)

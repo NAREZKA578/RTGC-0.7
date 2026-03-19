@@ -10,7 +10,6 @@ use crate::audio::AudioSystem;
 use crate::ecs::EcsManager;
 use crate::physics;
 use crate::graphics::renderer::MenuState;
-use crate::game::{Game, Animation, AnimationType};
 use crate::game::{WeatherSystem, DayNightCycle, Cargo, Winch};
 use crate::graphics::particles::ParticleSystem;
 use crate::graphics::debug_renderer::DebugRenderer;
@@ -128,8 +127,8 @@ impl Engine {
         let ecs_manager = EcsManager::new();
         
         // Create terrain mesh
-        let terrain_mesh = Mesh::new(&gl, &flat_vertices, &indices)?;
-        let mut renderer = graphics_context.renderer.borrow_mut();
+        let terrain_mesh = Mesh::new_raw(&gl, &flat_vertices, &indices)?;
+        let mut renderer = &mut graphics_context.renderer;
         renderer.set_terrain_mesh(terrain_mesh);
         
         // Create vehicle box mesh
