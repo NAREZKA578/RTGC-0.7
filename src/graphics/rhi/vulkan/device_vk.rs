@@ -7,9 +7,42 @@ use crate::graphics::rhi::{
 };
 use std::sync::Arc;
 use std::collections::HashMap;
+use std::ffi::CStr;
+
+/// Helper macro to create C strings at compile time (replacement for cstr! macro)
+macro_rules! cstr {
+    ($s:literal) => {
+        unsafe { CStr::from_bytes_with_nul_unchecked(concat!($s, "\0").as_bytes()) }
+    };
+}
 
 /// Vulkan Device implementation
 pub struct VkDevice {
+    pub instance: ash::Instance,
+    pub entry: ash::Entry,
+    pub physical_device: ash::vk::PhysicalDevice,
+    pub device: ash::Device,
+    pub queue_family_index: u32,
+    pub graphics_queue: ash::vk::Queue,
+    pub command_pool: ash::vk::CommandPool,
+    pub surface: ash::vk::SurfaceKHR,
+    pub swapchain: Option<ash::vk::SwapchainKHR>,
+    pub swapchain_format: ash::vk::Format,
+    pub extent: ash::vk::Extent2D,
+    pub images: Vec<ash::vk::Image>,
+    pub image_views: Vec<ash::vk::ImageView>,
+    pub framebuffers: Vec<ash::vk::Framebuffer>,
+    pub depth_image: Option<ash::vk::Image>,
+    pub depth_image_view: Option<ash::vk::ImageView>,
+    pub depth_image_memory: Option<ash::vk::DeviceMemory>,
+    pub descriptor_pool: ash::vk::DescriptorPool,
+    pub pipeline_cache: ash::vk::PipelineCache,
+    pub sampler: ash::vk::Sampler,
+    pub debug_utils: Option<ash::ext::debug_utils::DebugUtils>,
+    _debug_messenger: Option<ash::ext::debug_utils::DebugMessenger>,
+    resource_tracker: HashMap<ResourceHandle, VkResource>,
+    memory_stats: MemoryStats,
+}
     #[cfg(feature = "vulkan")]
     entry: ash::Entry,
     
@@ -826,5 +859,6 @@ pub fn create_vulkan_device(enable_validation: bool) -> RhiResult<Box<dyn IDevic
 #[cfg(feature = "vulkan")]
 fn cstr(s: &'static str) -> &'static std::ffi::CStr {
     use std::ffi::CStr;
-    CStr::from_bytes_with_nul(s.as_bytes()).unwrap()
+    // Safe unwrap - string literals always end with \0 when we add it manually
+    CStr::from_bytes_with_nul(concat!(s, "\0").as_bytes()).expect("cstr: invalid C string")
 }

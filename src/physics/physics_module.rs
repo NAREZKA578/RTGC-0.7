@@ -9,6 +9,7 @@ pub mod deformable_terrain;
 pub mod async_physics;
 pub mod advanced_vehicle;
 pub mod helicopter;
+pub mod vehicle;
 use spatial_hash::SpatialHash;
 use thread_pool::ThreadPool;
 use arena_allocator::ArenaAllocator;
@@ -17,6 +18,7 @@ pub use deformable_terrain::{DeformableTerrainComponent, DeformableTerrainInterf
 pub use async_physics::AsyncPhysicsEngine;
 pub use advanced_vehicle::{AdvancedVehicle, AdvancedWheel, AdvancedSuspension};
 pub use helicopter::{Helicopter, HelicopterState, MainRotor, TailRotor, TurboshaftEngine, HelicopterControls};
+pub use vehicle::{Vehicle, VehicleConfig, VehicleControls, WheelState};
 use tracing;
 
 #[derive(Debug, Clone)]
@@ -597,7 +599,7 @@ impl PhysicsWorld {
 
     pub fn remove_body(&mut self, index: usize) -> Option<RigidBody> {
         if self.rigid_bodies.is_allocated(index) {
-            let body = self.rigid_bodies.get(index).unwrap().clone();
+            let body = self.rigid_bodies.get(index).cloned()?;
             self.rigid_bodies.deallocate(index);
             Some(body)
         } else {
@@ -615,56 +617,27 @@ impl PhysicsWorld {
 
     /// Main physics step with fixed timestep for deterministic simulation
     /// Uses Symplectic Euler integration for energy conservation
-    pub fn step(&mut self) {
-        tracing::trace!("Starting physics step");
+    pub fn step(&mut self, delta_time: f32) {
+        tracing::trace!("Starting physics step with delta_time: {}", delta_time);
         let sub_dt = self.time_step / self.sub_steps as f32;
         
         for i in 0..self.sub_steps {
             tracing::trace!("Starting sub-step {}", i);
             
-            // Step 1: Parallel force integration using thread pool
-            let count = self.rigid_bodies.count();
-            let handles: Vec<_> = (0..count)
-                .map(|j| {
-                    let bodies_ptr = self.rigid_bodies.as_mut_ptr();
-                    let gravity = self.gravity;
-                    self.thread_pool.execute(move || {
-                        unsafe {
-                            if let Some(body) = (*bodies_ptr).get_mut(j) {
-                                if !body.is_static {
-                                    // Apply gravity
-                                    body.apply_force(gravity * body.mass);
-                                }
-                            }
-                        }
-                    })
-                })
-                .collect();
-            
-            // Wait for all force applications to complete
-            for handle in handles {
-                handle.join().unwrap();
+            // Step 1: Force integration - FIXED: sequential to avoid data races
+            for body in self.rigid_bodies.iter_mut() {
+                if !body.is_static {
+                    // Apply gravity
+                    body.apply_force(self.gravity * body.mass);
+                }
             }
             
-            // Step 2: Update positions and orientations using Symplectic Euler
-            let count = self.rigid_bodies.count();
-            let handles: Vec<_> = (0..count)
-                .map(|j| {
-                    let bodies_ptr = self.rigid_bodies.as_mut_ptr();
-                    self.thread_pool.execute(move || {
-                        unsafe {
-                            if let Some(body) = (*bodies_ptr).get_mut(j) {
-                                body.update(sub_dt);
-                                body.clear_forces(); // Clear forces after integration
-                            }
-                        }
-                    })
-                })
-                .collect();
-            
-            // Wait for all updates to complete
-            for handle in handles {
-                handle.join().unwrap();
+            // Step 2: Update positions and orientations using Symplectic Euler - FIXED: sequential
+            for body in self.rigid_bodies.iter_mut() {
+                if !body.is_static {
+                    body.update(sub_dt);
+                    body.clear_forces(); // Clear forces after integration
+                }
             }
             
             // Step 3: Broad phase collision detection
@@ -689,30 +662,22 @@ impl PhysicsWorld {
         let threshold = self.sleeping_threshold;
         let deactivation_time = self.deactivation_time;
         
-        let count = self.rigid_bodies.count();
-        let handles: Vec<_> = (0..count)
-            .map(|j| {
-                let bodies_ptr = self.rigid_bodies.as_mut_ptr();
-                self.thread_pool.execute(move || {
-                    unsafe {
-                        if let Some(body) = (*bodies_ptr).get_mut(j) {
-                            if !body.is_static {
-                                let velocity_magnitude = body.velocity.magnitude();
-                                let angular_magnitude = body.angular_velocity.magnitude();
-                                
-                                if velocity_magnitude < threshold && angular_magnitude < threshold {
-                                    // Body is candidate for sleeping - would need idle timer in production
-                                    // For now, just mark as potentially sleepable
-                                }
-                            }
-                        }
-                    }
-                })
-            })
-            .collect();
-        
-        for handle in handles {
-            handle.join().unwrap();
+        // FIXED: Sequential version to avoid data races with raw pointers
+        // TODO: Implement proper parallel sleeping body updates with thread-safe state
+        for body in self.rigid_bodies.iter_mut() {
+            if !body.is_static {
+                let velocity_magnitude = body.velocity.magnitude();
+                let angular_magnitude = body.angular_velocity.magnitude();
+                
+                if velocity_magnitude < threshold && angular_magnitude < threshold {
+                    // Body is candidate for sleeping - increment idle timer
+                    // In production: body.idle_timer += dt;
+                    // if body.idle_timer > deactivation_time { body.sleep(); }
+                } else {
+                    // Reset idle timer if moving
+                    // body.idle_timer = 0.0;
+                }
+            }
         }
     }
 
@@ -729,43 +694,37 @@ impl PhysicsWorld {
             }
         }
         
-        // Find potential collisions using spatial hash
-        // Parallelizing this part
-        use rayon::prelude::*;
+        // Find potential collisions using spatial hash - FIXED: sequential to avoid borrow issues
         let mut pairs = Vec::new();
         
         tracing::trace!("Starting broadphase collision detection");
-        self.rigid_bodies.iter()
+        let static_bodies: Vec<_> = self.rigid_bodies.iter()
             .enumerate()
             .filter(|(_, body)| !body.is_static)
-            .collect::<Vec<_>>()
-            .into_par_iter()
-            .flat_map(|(i, body)| {
-                let mut local_pairs = Vec::new();
-                let candidates = self.spatial_hash.get_potential_collisions(&body.position);
-                
-                for j in candidates {
-                    // Ensure we don't test against the same object or duplicate pairs
-                    if i >= j {
-                        continue;
-                    }
-                    
-                    let body_a = &self.rigid_bodies[i];
-                    let body_b = &self.rigid_bodies[j];
-                    
-                    // Check if both are static (can happen if body_a was static but body_b was dynamic)
-                    if body_a.is_static && body_b.is_static {
-                        continue;
-                    }
-                    
-                    // Double-check AABB intersection to reduce false positives
-                    if body_a.bounds.intersects(&body_b.bounds) {
-                        local_pairs.push((i, j));
-                    }
+            .collect();
+        
+        for (i, body_a) in &static_bodies {
+            let candidates = self.spatial_hash.get_potential_collisions(&body_a.position);
+            
+            for j in candidates {
+                // Ensure we don't test against the same object or duplicate pairs
+                if i >= &j {
+                    continue;
                 }
-                local_pairs
-            })
-            .collect_into_vec(&mut pairs);
+                
+                let body_b = &self.rigid_bodies[j];
+                
+                // Check if both are static (can happen if body_a was static but body_b was dynamic)
+                if body_a.is_static && body_b.is_static {
+                    continue;
+                }
+                
+                // Double-check AABB intersection to reduce false positives
+                if body_a.bounds.intersects(&body_b.bounds) {
+                    pairs.push((*i, j));
+                }
+            }
+        }
         
         self.broadphase_pairs = pairs;
         tracing::trace!("Broadphase collision detection found {} pairs", self.broadphase_pairs.len());
@@ -782,7 +741,11 @@ impl PhysicsWorld {
         }
         
         // Sort contacts by depth to resolve deepest penetrations first
-        contacts.sort_by(|a, b| b.penetration_depth.partial_cmp(&a.penetration_depth).unwrap());
+        contacts.sort_by(|a, b| {
+            b.penetration_depth
+                .partial_cmp(&a.penetration_depth)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         
         // Process contacts
         for contact in &contacts {
@@ -801,21 +764,18 @@ impl PhysicsWorld {
         }
         
         // Sort contacts by depth to resolve deepest penetrations first
-        contacts.sort_by(|a, b| b.penetration_depth.partial_cmp(&a.penetration_depth).unwrap());
-        
-        // Process contacts in parallel using rayon
-        use rayon::prelude::*;
-        let bodies_ptr = self.rigid_bodies.as_mut_ptr();
-        
-        tracing::trace!("Processing {} contacts in parallel", contacts.len());
-        contacts.par_iter().for_each(|contact| {
-            unsafe {
-                // Resolve contact - simplified parallel approach
-                // Note: This requires careful handling to avoid race conditions
-                // We'll use a sequential approach for the actual resolution but parallelize what we can
-                self.resolve_contact_sequential(contact, (*bodies_ptr).as_mut_slice());
-            }
+        contacts.sort_by(|a, b| {
+            b.penetration_depth
+                .partial_cmp(&a.penetration_depth)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
+        
+        // FIXED: Process contacts sequentially to avoid data races
+        // TODO: Implement proper parallel contact resolution with disjoint sets
+        tracing::trace!("Processing {} contacts sequentially (safe mode)", contacts.len());
+        for contact in &contacts {
+            self.resolve_contact_sequential(contact, self.rigid_bodies.as_mut_slice());
+        }
         tracing::trace!("Completed processing contacts");
     }
 
@@ -1536,39 +1496,37 @@ impl PhysicsWorld {
         }
     }
     
-    /// Parallel Sequential Impulse Solver using rayon for multi-core performance
-    fn solve_constraints_parallel(&mut self) {
-        // Parallel constraint solving using rayon
-        use rayon::prelude::*;
-        let bodies_ptr = self.rigid_bodies.as_mut_ptr();
-        let count = self.rigid_bodies.count();
-        
-        tracing::trace!("Solving constraints for {} bodies in parallel", count);
-        (0..count).into_par_iter().for_each(|i| {
-            unsafe {
-                if let Some(body) = (*bodies_ptr).get_mut(i) {
-                    if !body.is_static && body.position.y < 0.0 {
-                        // Collision with ground
-                        body.position.y = 0.0;
-                        
-                        // Apply bounce and friction
-                        if body.velocity.y < 0.0 {
-                            body.velocity.y *= -body.restitution;
-                            
-                            // Apply friction against ground
-                            body.velocity.x *= 1.0 - body.friction;
-                            body.velocity.z *= 1.0 - body.friction;
-                            
-                            // Stop tiny bounces
-                            if body.velocity.y.abs() < 0.1 {
-                                body.velocity.y = 0.0;
-                            }
-                        }
+    /// Sequential constraint solver - safe version without raw pointers
+    fn solve_constraints_sequential(&mut self) {
+        // Simple ground collision handling
+        for body in self.rigid_bodies.iter_mut() {
+            if !body.is_static && body.position.y < 0.0 {
+                // Collision with ground
+                body.position.y = 0.0;
+                
+                // Apply bounce and friction
+                if body.velocity.y < 0.0 {
+                    body.velocity.y *= -body.restitution;
+                    
+                    // Apply friction against ground
+                    body.velocity.x *= 1.0 - body.friction;
+                    body.velocity.z *= 1.0 - body.friction;
+                    
+                    // Stop tiny bounces
+                    if body.velocity.y.abs() < 0.1 {
+                        body.velocity.y = 0.0;
                     }
                 }
             }
-        });
-        tracing::trace!("Completed solving constraints");
+        }
+    }
+
+    /// Parallel Sequential Impulse Solver using rayon for multi-core performance
+    /// FIXED: Removed unsafe raw pointer access, using sequential version instead
+    fn solve_constraints_parallel(&mut self) {
+        // Use sequential version to avoid data races
+        // TODO: Implement proper parallel constraint solver with disjoint sets
+        self.solve_constraints_sequential();
     }
 
     // Raycasting methods
@@ -1577,15 +1535,10 @@ impl PhysicsWorld {
         let mut closest_distance = f32::MAX;
         
         for (idx, body) in self.rigid_bodies.iter().enumerate() {
-            if let Some(hit) = self.raycast_single_body(ray, body) {
+            if let Some(hit) = self.raycast_single_body(ray, body, idx) {
                 if hit.distance < closest_distance {
                     closest_distance = hit.distance;
-                    closest_hit = Some(RaycastHit {
-                        point: hit.point,
-                        normal: hit.normal,
-                        distance: hit.distance,
-                        body_index: idx,
-                    });
+                    closest_hit = Some(hit);
                 }
             }
         }
@@ -1593,7 +1546,7 @@ impl PhysicsWorld {
         closest_hit
     }
 
-    fn raycast_single_body(&self, ray: &Ray, body: &RigidBody) -> Option<RaycastHit> {
+    fn raycast_single_body(&self, ray: &Ray, body: &RigidBody, body_index: usize) -> Option<RaycastHit> {
         let transform = body.get_world_transform();
         let inv_transform = transform.inverse();
         
@@ -1606,7 +1559,7 @@ impl PhysicsWorld {
             direction: local_direction,
         };
         
-        match &body.shape {
+        let hit = match &body.shape {
             Shape::Sphere { radius } => {
                 self.raycast_sphere(&local_ray, *radius)
             }
@@ -1622,7 +1575,13 @@ impl PhysicsWorld {
             Shape::Mesh { vertices, indices } => {
                 self.raycast_mesh(&local_ray, vertices, indices)
             }
-        }
+        };
+        
+        // Update body_index in the hit result
+        hit.map(|mut h| {
+            h.body_index = body_index;
+            h
+        })
     }
 
     fn raycast_sphere(&self, ray: &Ray, radius: f32) -> Option<RaycastHit> {
@@ -1650,7 +1609,7 @@ impl PhysicsWorld {
                     point: hit_point,
                     normal,
                     distance: t,
-                    body_index: 0, // Placeholder, will be updated by caller
+                    body_index: 0, // Will be set by raycast_single_body caller
                 })
             } else {
                 None
@@ -1692,7 +1651,7 @@ impl PhysicsWorld {
                     point: hit_point,
                     normal,
                     distance: t,
-                    body_index: 0, // Placeholder, will be updated by caller
+                    body_index: 0, // Will be set by raycast_single_body caller
                 })
             } else {
                 None
@@ -1767,7 +1726,7 @@ impl PhysicsWorld {
                     point: hit_point,
                     normal,
                     distance: t,
-                    body_index: 0, // Placeholder, will be updated by caller
+                    body_index: 0, // Will be set by raycast_single_body caller
                 })
             } else {
                 None
@@ -1806,7 +1765,7 @@ impl PhysicsWorld {
                 point: hit_pos,
                 normal: Vector3::new(0.0, 1.0, 0.0),
                 distance: t,
-                body_index: 0, // Placeholder, will be updated by caller
+                body_index: 0, // Will be set by raycast_single_body caller
             })
         } else {
             None
@@ -1883,7 +1842,7 @@ impl PhysicsWorld {
                 point: hit_point,
                 normal,
                 distance: t,
-                body_index: 0, // Placeholder, will be updated by caller
+                body_index: 0, // Will be set by raycast_single_body caller
             })
         } else {
             None

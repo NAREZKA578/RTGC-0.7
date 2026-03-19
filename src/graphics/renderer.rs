@@ -194,17 +194,22 @@ impl Renderer {
         let view = self.camera.view_matrix();
         
         unsafe {
-            let u_projection = self.gl.get_uniform_location(self.shader.program, "u_projection").unwrap();
-            let u_view = self.gl.get_uniform_location(self.shader.program, "u_view").unwrap();
-            let u_light_pos = self.gl.get_uniform_location(self.shader.program, "u_light_pos").unwrap();
-            let u_view_pos = self.gl.get_uniform_location(self.shader.program, "u_view_pos").unwrap();
-            let u_light_color = self.gl.get_uniform_location(self.shader.program, "u_light_color").unwrap();
-            
-            self.gl.uniform_matrix_4_f32_slice(Some(&u_projection), false, projection.as_slice());
-            self.gl.uniform_matrix_4_f32_slice(Some(&u_view), false, view.as_slice());
-            self.gl.uniform_3_f32(Some(&u_light_pos), 5.0, 5.0, 5.0);
-            self.gl.uniform_3_f32(Some(&u_view_pos), self.camera.position.x, self.camera.position.y, self.camera.position.z);
-            self.gl.uniform_3_f32(Some(&u_light_color), 1.0, 1.0, 1.0);
+            // Set uniforms with safe handling - skip if uniform not found
+            if let Some(u_projection) = self.gl.get_uniform_location(self.shader.program, "u_projection") {
+                self.gl.uniform_matrix_4_f32_slice(Some(&u_projection), false, projection.as_slice());
+            }
+            if let Some(u_view) = self.gl.get_uniform_location(self.shader.program, "u_view") {
+                self.gl.uniform_matrix_4_f32_slice(Some(&u_view), false, view.as_slice());
+            }
+            if let Some(u_light_pos) = self.gl.get_uniform_location(self.shader.program, "u_light_pos") {
+                self.gl.uniform_3_f32(Some(&u_light_pos), 5.0, 5.0, 5.0);
+            }
+            if let Some(u_view_pos) = self.gl.get_uniform_location(self.shader.program, "u_view_pos") {
+                self.gl.uniform_3_f32(Some(&u_view_pos), self.camera.position.x, self.camera.position.y, self.camera.position.z);
+            }
+            if let Some(u_light_color) = self.gl.get_uniform_location(self.shader.program, "u_light_color") {
+                self.gl.uniform_3_f32(Some(&u_light_color), 1.0, 1.0, 1.0);
+            }
         }
         
         // Render each visible object using appropriate LOD model
@@ -267,11 +272,13 @@ impl Renderer {
             let view = self.camera.view_matrix();
             
             unsafe {
-                let u_projection = self.gl.get_uniform_location(self.shader.program, "u_projection").unwrap();
-                let u_view = self.gl.get_uniform_location(self.shader.program, "u_view").unwrap();
-                
-                self.gl.uniform_matrix_4_f32_slice(Some(&u_projection), false, projection.as_slice());
-                self.gl.uniform_matrix_4_f32_slice(Some(&u_view), false, view.as_slice());
+                // Set uniforms with safe handling - skip if uniform not found
+                if let Some(u_projection) = self.gl.get_uniform_location(self.shader.program, "u_projection") {
+                    self.gl.uniform_matrix_4_f32_slice(Some(&u_projection), false, projection.as_slice());
+                }
+                if let Some(u_view) = self.gl.get_uniform_location(self.shader.program, "u_view") {
+                    self.gl.uniform_matrix_4_f32_slice(Some(&u_view), false, view.as_slice());
+                }
             }
             
             for mesh in &model.meshes {

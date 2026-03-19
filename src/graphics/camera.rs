@@ -121,4 +121,8 @@ impl Camera {
     pub fn get_direction(&self) -> Vector3<f32> {
         (self.target - self.position).normalize()
     }
+    
+    pub fn update_aspect_ratio(&mut self, aspect_ratio: f32) {
+        self.aspect_ratio = aspect_ratio;
+    }
 }

@@ -3,7 +3,7 @@ use winit::{
     keyboard::{KeyCode, PhysicalKey},
 };
 use std::sync::Arc;
-use crate::graphics::GraphicsContext;
+use crate::graphics::{GraphicsContext, gl_context::GlContext};
 use crate::input::InputManager;
 use crate::audio::AudioSystem;
 use crate::ecs::EcsManager;
@@ -19,13 +19,19 @@ pub struct Engine {
     pub ecs_manager: EcsManager,
     pub physics_world: physics::PhysicsWorld,
     pub game: Option<Game>,
-    window: Arc<winit::window::Window>,
+    gl_context: GlContext,
     last_frame_time: std::time::Instant,
 }
 
 impl Engine {
-    pub fn new(window: Arc<winit::window::Window>) -> Result<Self, Box<dyn std::error::Error>> {
-        let graphics_context = GraphicsContext::new(window.clone())?;
+    pub fn new(event_loop: &winit::event_loop::EventLoop<()>) -> Result<Self, Box<dyn std::error::Error>> {
+        // Создаем OpenGL контекст через glutin
+        let gl_context = GlContext::new(event_loop)?;
+        
+        let window = Arc::new(gl_context.window.clone());
+        let gl = gl_context.gl.clone();
+        
+        let graphics_context = GraphicsContext::new(window, gl)?;
         let input_manager = InputManager::new();
         let audio_system = AudioSystem::new()?;
         let ecs_manager = EcsManager::new();
@@ -38,7 +44,7 @@ impl Engine {
             ecs_manager,
             physics_world,
             game: None,
-            window,
+            gl_context,
             last_frame_time: std::time::Instant::now(),
         })
     }
@@ -46,15 +52,25 @@ impl Engine {
     pub fn handle_window_event(&mut self, event: &WindowEvent) -> bool {
         match event {
             WindowEvent::CloseRequested => false,
+            WindowEvent::Resized(physical_size) => {
+                // Update viewport when window is resized
+                if physical_size.width > 0 && physical_size.height > 0 {
+                    let _ = self.gl_context.resize(physical_size.width, physical_size.height);
+                    self.graphics_context.resize(*physical_size);
+                }
+                true
+            }
             WindowEvent::KeyboardInput { event: key_event, .. } => {
-                self.handle_key_event(key_event);
+                if !self.handle_key_event(key_event) {
+                    return false;
+                }
                 true
             }
             _ => true,
         }
     }
 
-    fn handle_key_event(&mut self, key_event: &KeyEvent) {
+    fn handle_key_event(&mut self, key_event: &KeyEvent) -> bool {
         // Update input manager
         self.input_manager.handle_keyboard_input(key_event);
 
@@ -63,7 +79,8 @@ impl Engine {
                 // Handle escape key differently based on current menu state
                 match self.graphics_context.renderer.menu_state {
                     MenuState::MainMenu | MenuState::Loading => {
-                        // Exit the application
+                        // Exit the application - return false to signal caller to exit
+                        return false;
                     }
                     MenuState::CitySelection | MenuState::InGame | MenuState::WorldCreation | MenuState::Settings => {
                         // Go back to main menu
@@ -183,12 +200,14 @@ impl Engine {
                 match self.graphics_context.renderer.menu_state {
                     MenuState::MainMenu => {
                         // Exit application
+                        return false;
                     }
                     _ => {}
                 }
             }
             _ => {}
         }
+        true
     }
 
     pub fn update(&mut self) {
@@ -204,13 +223,13 @@ impl Engine {
             MenuState::InGame => {
                 // Update physics world
                 profiler::start_timer("physics_step");
-                self.physics_world.step();
+                self.physics_world.step(delta_time);
                 profiler::stop_timer("physics_step");
 
                 // Update game if it exists
                 if let Some(ref mut game) = self.game {
                     profiler::start_timer("game_update");
-                    game.update();
+                    game.update(delta_time);
                     profiler::stop_timer("game_update");
                     
                     // Update texture streaming based on truck position
@@ -224,7 +243,8 @@ impl Engine {
                 }
             }
             _ => {
-                // Update other systems as needed
+                // Update other systems as needed (still use delta_time)
+                // Even in menu states, we may want to update animations, etc.
             }
         }
 
@@ -237,6 +257,9 @@ impl Engine {
         profiler::start_timer("render_cycle");
         
         self.graphics_context.render()?;
+        
+        // Swap buffers
+        self.gl_context.swap_buffers()?;
         
         // Stop profiling the render cycle
         profiler::stop_timer("render_cycle");

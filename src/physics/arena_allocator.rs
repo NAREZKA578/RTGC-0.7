@@ -1,4 +1,6 @@
 use std::vec::Vec;
+use std::ops::Index;
+use std::ops::IndexMut;
 
 /// A simple arena allocator for efficient memory management with generation tracking to prevent use-after-free bugs
 pub struct ArenaAllocator<T> {
@@ -125,10 +127,59 @@ impl<T> ArenaAllocator<T> {
     pub fn capacity(&self) -> usize {
         self.items.capacity()
     }
+
+    /// Returns an iterator over allocated items
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        self.items.iter().filter_map(|opt| opt.as_ref())
+    }
+
+    /// Returns a mutable iterator over allocated items
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> {
+        self.items.iter_mut().filter_map(|opt| opt.as_mut())
+    }
+
+    /// Returns a mutable pointer to the underlying data
+    pub fn as_mut_ptr(&mut self) -> *mut Option<T> {
+        self.items.as_mut_ptr()
+    }
+
+    /// Returns a mutable slice of the underlying data
+    pub fn as_mut_slice(&mut self) -> &mut [Option<T>] {
+        &mut self.items
+    }
+
+    /// Splits the arena into two mutable slices at the given index
+    pub fn split_at_mut(&mut self, mid: usize) -> (&mut [Option<T>], &mut [Option<T>]) {
+        self.items.split_at_mut(mid)
+    }
+
+    /// Returns the length of the arena
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    /// Returns true if the arena is empty
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
 }
 
 impl<T> Default for ArenaAllocator<T> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<T> Index<usize> for ArenaAllocator<T> {
+    type Output = T;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        self.items[index].as_ref().expect("Index out of bounds or not allocated")
+    }
+}
+
+impl<T> IndexMut<usize> for ArenaAllocator<T> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        self.items[index].as_mut().expect("Index out of bounds or not allocated")
     }
 }

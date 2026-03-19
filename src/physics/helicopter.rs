@@ -593,7 +593,9 @@ impl HelicopterControls {
 }
 
 /// Полная модель вертолёта
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+/// Helicopter physics state
+#[derive(Debug, Clone)]
 pub struct Helicopter {
     // Основные параметры
     pub mass: f32,                          // Масса (кг)
