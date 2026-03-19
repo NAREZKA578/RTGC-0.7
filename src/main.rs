@@ -1,7 +1,6 @@
 use winit::{
     event::{Event, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
-    window::WindowBuilder,
+    event_loop::EventLoop,
 };
 use std::sync::Arc;
 use parking_lot::Mutex;
@@ -24,26 +23,22 @@ mod ui;
 mod game;
 #[path = "profiler.rs"]
 mod profiler;
+#[path = "utils/mod.rs"]
+mod utils;
 
 // Initialize tracing
 use tracing_subscriber;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize tracing subscriber
-    tracing_subscriber::fmt::init();
+    // Initialize logging (only one logger - tracing)
+    utils::logger::init_logger();
     
-    env_logger::init();
+    let event_loop = EventLoop::new()?;
     
-    let event_loop = EventLoop::new();
-    let window = WindowBuilder::new()
-        .with_title("Off-Road Truck Simulator")
-        .with_inner_size(winit::dpi::LogicalSize::new(1920, 1080))
-        .build(&event_loop)?;
-
-    let window = Arc::new(window);
+    // Initialize engine components (creates OpenGL context via glutin)
+    let mut engine = engine::Engine::new(&event_loop)?;
     
-    // Initialize engine components
-    let mut engine = engine::Engine::new(window.clone())?;
+    let window = Arc::new(engine.gl_context.window.clone());
     
     // Initialize game state
     engine.game = Some(game::Game::new());
@@ -52,9 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut frame_count = 0;
     let mut last_prof_report = std::time::Instant::now();
     
-    event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Poll;
-        
+    event_loop.run(move |event, event_loop| {
         match event {
             Event::WindowEvent {
                 ref event,
@@ -63,11 +56,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if !engine.handle_window_event(event) {
                     // Print profiling report before exiting
                     profiler::print_profile_report();
-                    *control_flow = ControlFlow::Exit;
+                    event_loop.exit();
                 }
-            }
-            Event::MainEventsCleared => {
-                window.request_redraw();
             }
             Event::RedrawRequested(_) => {
                 engine.update();
@@ -80,7 +70,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     );
                 }
                 
-                engine.render().unwrap();
+                if let Err(e) = engine.render() {
+                    eprintln!("Render error: {:?}", e);
+                    // Don't panic, just log the error and continue
+                }
                 
                 // Increment frame counter
                 frame_count += 1;
@@ -92,6 +85,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     frame_count = 0;
                     last_prof_report = std::time::Instant::now();
                 }
+            }
+            Event::AboutToWait => {
+                // Request redraw for next frame
+                window.request_redraw();
             }
             _ => {}
         }

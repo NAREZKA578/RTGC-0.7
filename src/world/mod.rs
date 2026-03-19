@@ -1,0 +1,22 @@
+//! World Module for RTGC-0.7
+//! Provides terrain generation, chunk management, world streaming, and day/night cycle
+
+pub mod world_module;
+pub mod chunk;
+pub mod chunk_manager;
+pub mod prop_spawner;
+pub mod terrain_generator;
+pub mod lod_system;
+pub mod spatial_index;
+pub mod world_streaming;
+pub mod day_night_cycle;
+
+pub use world_module::WorldManager;
+pub use chunk::Chunk;
+pub use chunk_manager::ChunkManager;
+pub use prop_spawner::PropSpawner;
+pub use terrain_generator::TerrainGenerator;
+pub use lod_system::LodSystem;
+pub use spatial_index::SpatialIndex;
+pub use world_streaming::WorldStreamer;
+pub use day_night_cycle::DayNightCycle;

@@ -6,7 +6,37 @@ pub mod texture;
 pub mod models;
 pub mod lod_system;
 pub mod texture_streaming;
-pub mod rhi;
+pub mod lighting;
+pub mod gl_context;
+pub mod rhi {
+    pub mod rhi_module;
+    pub mod types;
+    pub mod device;
+    pub mod factory;
+    pub mod gl;
+    
+    #[cfg(feature = "vulkan")]
+    pub mod vulkan {
+        pub mod device_vk;
+        pub mod command_vk;
+        pub mod pipeline_vk;
+        pub mod texture_vk;
+    }
+    
+    #[cfg(all(windows, feature = "dx12"))]
+    pub mod dx12 {
+        pub mod device_dx12;
+        pub mod command_dx12;
+        pub mod pipeline_dx12;
+        pub mod texture_dx12;
+    }
+    
+    pub use rhi_module::*;
+    pub use types::*;
+    pub use device::*;
+    pub use factory::*;
+    pub use gl::*;
+}
 
 use winit::window::Window;
 use std::sync::Arc;
@@ -22,21 +52,15 @@ pub struct GraphicsContext {
 }
 
 impl GraphicsContext {
-    pub fn new(window: Arc<Window>) -> Result<Self, Box<dyn std::error::Error>> {
-        unsafe {
-            let gl = glow::Context::from_loader_function(|s| {
-                window.get_proc_address(s) as *const _
-            });
-            
-            let renderer = Renderer::new(gl.clone())?;
-            
-            Ok(Self {
-                renderer,
-                gl,
-                window,
-                rhi_config: RhiConfig::default(),
-            })
-        }
+    pub fn new(window: Arc<Window>, gl: Context) -> Result<Self, Box<dyn std::error::Error>> {
+        let renderer = Renderer::new(gl.clone())?;
+        
+        Ok(Self {
+            renderer,
+            gl,
+            window,
+            rhi_config: RhiConfig::default(),
+        })
     }
     
     /// Initialize the RHI with Vulkan or DirectX 12 backend
@@ -74,5 +98,19 @@ impl GraphicsContext {
     
     pub fn set_rhi_config(&mut self, config: RhiConfig) {
         self.rhi_config = config;
+    }
+    
+    pub fn resize(&mut self, size: winit::dpi::PhysicalSize<u32>) {
+        // Update OpenGL viewport
+        unsafe {
+            self.gl.viewport(0, 0, size.width as i32, size.height as i32);
+        }
+        
+        // Update renderer camera aspect ratio
+        self.renderer.camera.update_aspect_ratio(size.width as f32 / size.height as f32);
+    }
+    
+    pub fn get_gl(&self) -> &Context {
+        &self.gl
     }
 }

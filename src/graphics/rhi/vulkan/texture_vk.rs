@@ -67,12 +67,54 @@ impl VkTexture {
                 .map_err(|e| RhiError::ResourceCreationFailed(format!("Failed to create image: {:?}", e)))?
         };
         
-        // TODO: Allocate and bind memory
+        // Allocate and bind memory for the image
+        let mem_requirements = unsafe { device.get_image_memory_requirements(image) };
+        
+        // Find a suitable memory type
+        let mem_type_index = Self::find_memory_type(
+            physical_device,
+            device,
+            mem_requirements.memory_type_bits,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        )?;
+        
+        let alloc_info = vk::MemoryAllocateInfo::builder()
+            .allocation_size(mem_requirements.size)
+            .memory_type_index(mem_type_index);
+        
+        let allocation = unsafe {
+            device.allocate_memory(&alloc_info, None)
+                .map_err(|e| RhiError::ResourceCreationFailed(format!("Failed to allocate memory: {:?}", e)))?
+        };
+        
+        unsafe {
+            device.bind_image_memory(image, allocation, 0)
+                .map_err(|e| RhiError::ResourceCreationFailed(format!("Failed to bind image memory: {:?}", e)))?;
+        }
+        
+        // Create image view
+        let view_info = vk::ImageViewCreateInfo::builder()
+            .image(image)
+            .view_type(Self::to_vk_image_view_type(desc.dimension))
+            .format(format)
+            .components(vk::ComponentMapping::default())
+            .subresource_range(vk::ImageSubresourceRange {
+                aspect_mask: Self::get_aspect_mask(desc.format),
+                base_mip_level: 0,
+                level_count: desc.mip_levels,
+                base_array_layer: 0,
+                layer_count: array_layers,
+            });
+        
+        let view = unsafe {
+            Some(device.create_image_view(&view_info, None)
+                .map_err(|e| RhiError::ResourceCreationFailed(format!("Failed to create image view: {:?}", e)))?)
+        };
         
         Ok(Self {
             image,
-            allocation: None,
-            view: None,
+            allocation: Some(allocation),
+            view,
             handle,
             description: desc.clone(),
             width: desc.width,
@@ -80,6 +122,51 @@ impl VkTexture {
             depth_or_array_layers: desc.depth_or_array_layers,
             mip_levels: desc.mip_levels,
         })
+    }
+    
+    #[cfg(feature = "vulkan")]
+    fn find_memory_type(
+        physical_device: vk::PhysicalDevice,
+        device: &ash::Device,
+        type_filter: u32,
+        properties: vk::MemoryPropertyFlags,
+    ) -> RhiResult<u32> {
+        let mem_properties = unsafe { device.get_physical_device_memory_properties(physical_device) };
+        
+        for i in 0..mem_properties.memory_type_count {
+            if (type_filter & (1 << i)) != 0
+                && mem_properties.memory_types[i as usize].property_flags.contains(properties)
+            {
+                return Ok(i);
+            }
+        }
+        
+        Err(RhiError::ResourceCreationFailed("Failed to find suitable memory type".to_string()))
+    }
+    
+    #[cfg(feature = "vulkan")]
+    fn to_vk_image_view_type(dimension: TextureDimension) -> vk::ImageViewType {
+        match dimension {
+            TextureDimension::D1 => vk::ImageViewType::TYPE_1D,
+            TextureDimension::D2 => vk::ImageViewType::TYPE_2D,
+            TextureDimension::D3 => vk::ImageViewType::TYPE_3D,
+            TextureDimension::Cube => vk::ImageViewType::CUBE,
+        }
+    }
+    
+    #[cfg(feature = "vulkan")]
+    fn get_aspect_mask(format: TextureFormat) -> vk::ImageAspectFlags {
+        match format {
+            TextureFormat::D16Unorm | TextureFormat::D24UnormS8Uint | 
+            TextureFormat::D32Float | TextureFormat::D32FloatS8UintX24 => {
+                if matches!(format, TextureFormat::D24UnormS8Uint | TextureFormat::D32FloatS8UintX24) {
+                    vk::ImageAspectFlags::DEPTH | vk::ImageAspectFlags::STENCIL
+                } else {
+                    vk::ImageAspectFlags::DEPTH
+                }
+            }
+            _ => vk::ImageAspectFlags::COLOR,
+        }
     }
     
     #[cfg(feature = "vulkan")]

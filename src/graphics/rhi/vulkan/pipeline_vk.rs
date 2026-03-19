@@ -84,6 +84,13 @@ impl VkPipelineState {
         // Graphics pipeline create info
         let stages = Self::build_shader_stages(device, desc);
         
+        // Create pipeline layout (empty for now - can be extended with descriptor set layouts)
+        let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo::default();
+        let pipeline_layout = unsafe {
+            device.create_pipeline_layout(&pipeline_layout_create_info, None)
+                .map_err(|e| RhiError::ResourceCreationFailed(format!("Failed to create pipeline layout: {:?}", e)))?
+        };
+        
         let create_info = vk::GraphicsPipelineCreateInfo::default()
             .stages(&stages)
             .vertex_input_state(&vertex_input_state)
@@ -94,7 +101,7 @@ impl VkPipelineState {
             .depth_stencil_state(&depth_stencil)
             .color_blend_state(&color_blend_state)
             .dynamic_state(&dynamic_state)
-            .layout(vk::PipelineLayout::null()) // TODO: Create proper pipeline layout
+            .layout(pipeline_layout)
             .render_pass(render_pass)
             .subpass(0);
         
@@ -111,7 +118,7 @@ impl VkPipelineState {
         
         Ok(Self {
             pipeline,
-            pipeline_layout: vk::PipelineLayout::null(),
+            pipeline_layout,
             handle,
             description: desc.clone(),
             device: Arc::new(*device_fn),

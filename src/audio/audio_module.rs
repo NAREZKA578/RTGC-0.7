@@ -433,6 +433,17 @@ impl AudioSystem {
 
 impl Default for AudioSystem {
     fn default() -> Self {
-        Self::new().unwrap()
+        Self::new().unwrap_or_else(|e| {
+            log::warn!("Failed to initialize audio system: {}, using silent fallback", e);
+            // Create a minimal silent audio system as fallback
+            AudioSystem {
+                context: None,
+                sources: Vec::new(),
+                listener_position: nalgebra::Vector3::zeros(),
+                listener_velocity: nalgebra::Vector3::zeros(),
+                master_volume: 1.0,
+                config: AudioConfig::default(),
+            }
+        })
     }
 }

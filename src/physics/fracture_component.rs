@@ -1,5 +1,6 @@
 use nalgebra::{Vector3, Matrix3, UnitQuaternion};
 use crate::physics::{RigidBody, Shape};
+use rand::Rng;
 
 /// Abstract component for destructible objects
 /// This follows the approach described in the README where "zаглушек и пометок" (placeholders and markers) 
@@ -17,6 +18,9 @@ pub struct FractureComponent {
     
     /// Material properties affecting fracture behavior
     pub material_properties: MaterialProperties,
+    
+    /// Current structural integrity (0.0 = completely destroyed, 1.0 = intact)
+    pub structural_integrity: f32,
 }
 
 impl FractureComponent {
@@ -26,27 +30,30 @@ impl FractureComponent {
             strength_threshold,
             fragments: Vec::new(),
             material_properties: MaterialProperties::default(),
+            structural_integrity: 1.0,
         }
     }
     
     /// Check if the object should fracture based on applied force
     pub fn should_fracture(&self, impact_force: f32) -> bool {
-        impact_force > self.strength_threshold
+        impact_force > self.strength_threshold * self.structural_integrity
     }
     
     /// Apply damage to the component
     pub fn apply_damage(&mut self, damage: f32) {
-        // In a real implementation, this would reduce structural integrity
-        // For now, we'll just track cumulative damage
+        // Reduce structural integrity based on damage
+        let damage_factor = damage / self.strength_threshold;
+        self.structural_integrity = (self.structural_integrity - damage_factor).max(0.0);
     }
     
     /// Generate fragments when fracturing occurs
     pub fn generate_fragments(&self, original_body: &RigidBody) -> Vec<RigidBody> {
-        if !self.can_fracture {
+        if !self.can_fracture || self.fragments.is_empty() {
             return vec![];
         }
         
         let mut fragments = Vec::new();
+        let mut rng = rand::thread_rng();
         
         // Create fragment rigid bodies based on stored fragment data
         for fragment_info in &self.fragments {
@@ -75,9 +82,9 @@ impl FractureComponent {
             
             // Add some initial velocity to make fragments fly apart
             fragment_body.velocity += Vector3::new(
-                (rand::random::<f32>() - 0.5) * 2.0,
-                rand::random::<f32>(),
-                (rand::random::<f32>() - 0.5) * 2.0,
+                (rng.gen::<f32>() - 0.5) * 2.0,
+                rng.gen::<f32>(),
+                (rng.gen::<f32>() - 0.5) * 2.0,
             ) * 2.0; // Scale factor for initial velocity
             
             fragments.push(fragment_body);

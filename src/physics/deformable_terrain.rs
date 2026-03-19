@@ -111,13 +111,15 @@ impl DeformableTerrainComponent {
         }
         
         // Record the deformation event
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or(std::time::Duration::ZERO)
+            .as_secs_f32();
+        
         self.deformation_history.push(DeformationEvent {
             position,
             deformation_type: deformation_type.clone(),
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs_f32(),
+            timestamp,
         });
         
         true
