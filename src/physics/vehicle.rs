@@ -213,6 +213,11 @@ impl Vehicle {
         // Get wheel world position
         let wheel_world_pos = self.body.position + self.body.rotation * wheel.local_position;
         
+        // Raycast вниз для определения контакта с землёй
+        let ray_origin = wheel_world_pos;
+        let ray_direction = Vector3::new(0.0, -1.0, 0.0);
+        let ray_length = self.config.wheel_radius + self.config.suspension_rest_length + self.config.max_suspension_travel;
+        
         // Sample ground height at wheel position
         let ground_y = ground_height(wheel_world_pos.x, wheel_world_pos.z);
         
@@ -223,6 +228,10 @@ impl Vehicle {
         wheel.is_in_contact = suspension_deflection > 0.0;
         
         if wheel.is_in_contact {
+            // Устанавливаем нормаль контакта (вверх, так как земля горизонтальная)
+            wheel.contact_normal = Some(Vector3::new(0.0, 1.0, 0.0));
+            wheel.contact_point = Some(Vector3::new(wheel_world_pos.x, ground_y, wheel_world_pos.z));
+            
             wheel.suspension_compression = suspension_deflection.clamp(0.0, self.config.max_suspension_travel);
             
             // Calculate suspension force

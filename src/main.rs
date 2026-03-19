@@ -26,9 +26,6 @@ mod profiler;
 #[path = "utils/mod.rs"]
 mod utils;
 
-// Initialize tracing
-use tracing_subscriber;
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging (only one logger - tracing)
     utils::logger::init_logger();

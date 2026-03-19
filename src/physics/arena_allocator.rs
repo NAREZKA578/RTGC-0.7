@@ -174,12 +174,16 @@ impl<T> Index<usize> for ArenaAllocator<T> {
     type Output = T;
 
     fn index(&self, index: usize) -> &Self::Output {
+        // SAFETY: This will panic if index is out of bounds or not allocated.
+        // Prefer using get() or get_unchecked() for safer access patterns.
         self.items[index].as_ref().expect("Index out of bounds or not allocated")
     }
 }
 
 impl<T> IndexMut<usize> for ArenaAllocator<T> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        // SAFETY: This will panic if index is out of bounds or not allocated.
+        // Prefer using get_mut() or get_mut_unchecked() for safer access patterns.
         self.items[index].as_mut().expect("Index out of bounds or not allocated")
     }
 }
