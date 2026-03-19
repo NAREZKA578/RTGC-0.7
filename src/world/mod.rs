@@ -12,7 +12,7 @@ pub mod world_streaming;
 pub mod day_night_cycle;
 
 pub use world_module::WorldManager;
-pub use chunk::Chunk;
+pub use chunk::{Chunk, ChunkData, TerrainVertex, generate_chunk_mesh, CHUNK_SIZE, HEIGHTMAP_RESOLUTION};
 pub use chunk_manager::ChunkManager;
 pub use prop_spawner::PropSpawner;
 pub use terrain_generator::TerrainGenerator;

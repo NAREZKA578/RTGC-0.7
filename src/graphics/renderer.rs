@@ -28,6 +28,15 @@ pub struct Renderer {
     pub menu_state: MenuState,
     pub lod_manager: LodManager,
     pub texture_streaming: TextureStreamingSystem,
+    // SPRINT 1: Terrain & Vehicle rendering
+    terrain_mesh: Option<Mesh>,
+    vehicle_box_mesh: Option<Mesh>,
+    vehicle_transform: Option<(Vector3<f32>, UnitQuaternion<f32>)>,
+    // Window dimensions for HUD rendering
+    width: u32,
+    height: u32,
+    // HUD Manager reference for rendering
+    hud_data: Option<crate::ui::hud::VehicleHudData>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -127,8 +136,82 @@ impl Renderer {
             current_city_index: 0,
             menu_state: MenuState::Loading,
             lod_manager: LodManager::new(),
-            texture_streaming: TextureStreamingSystem::new(128, 10.0, 5), // Max 128 textures, 10 units per tile, 5 tile radius
+            texture_streaming: TextureStreamingSystem::new(128, 10.0, 5),
+            // SPRINT 1: Initialize terrain & vehicle mesh placeholders
+            terrain_mesh: None,
+            vehicle_box_mesh: None,
+            vehicle_transform: None,
+            hud_data: None,
         })
+    }
+    
+    /// Set the terrain mesh for rendering
+    pub fn set_terrain_mesh(&mut self, mesh: Mesh) {
+        self.terrain_mesh = Some(mesh);
+    }
+    
+    /// Set vehicle transform and HUD data
+    pub fn set_vehicle_transform(&mut self, pos: Vector3<f32>, rot: UnitQuaternion<f32>) {
+        self.vehicle_transform = Some((pos, rot));
+    }
+    
+    /// Set HUD data for rendering
+    pub fn set_hud_data(&mut self, data: crate::ui::hud::VehicleHudData) {
+        self.hud_data = Some(data);
+    }
+    
+    /// Create a simple box mesh for the vehicle (temporary until GLTF loading works)
+    pub fn create_vehicle_box_mesh(&mut self, half_extents: Vector3<f32>) -> Result<(), Box<dyn std::error::Error>> {
+        // Create a unit cube centered at origin, scaled by half_extents
+        let hx = half_extents.x;
+        let hy = half_extents.y;
+        let hz = half_extents.z;
+        
+        // Cube vertices: 8 corners with normals
+        let vertices: Vec<f32> = vec![
+            // Front face (z = +hz)
+            -hx, -hy,  hz,  0.0, 0.0, 1.0,  0.0, 0.0,
+             hx, -hy,  hz,  0.0, 0.0, 1.0,  1.0, 0.0,
+             hx,  hy,  hz,  0.0, 0.0, 1.0,  1.0, 1.0,
+            -hx,  hy,  hz,  0.0, 0.0, 1.0,  0.0, 1.0,
+            // Back face (z = -hz)
+             hx, -hy, -hz,  0.0, 0.0,-1.0,  0.0, 0.0,
+            -hx, -hy, -hz,  0.0, 0.0,-1.0,  1.0, 0.0,
+            -hx,  hy, -hz,  0.0, 0.0,-1.0,  1.0, 1.0,
+             hx,  hy, -hz,  0.0, 0.0,-1.0,  0.0, 1.0,
+            // Top face (y = +hy)
+            -hx,  hy, -hz,  0.0, 1.0, 0.0,  0.0, 0.0,
+             hx,  hy, -hz,  0.0, 1.0, 0.0,  1.0, 0.0,
+             hx,  hy,  hz,  0.0, 1.0, 0.0,  1.0, 1.0,
+            -hx,  hy,  hz,  0.0, 1.0, 0.0,  0.0, 1.0,
+            // Bottom face (y = -hy)
+            -hx, -hy,  hz,  0.0,-1.0, 0.0,  0.0, 0.0,
+             hx, -hy,  hz,  0.0,-1.0, 0.0,  1.0, 0.0,
+             hx, -hy, -hz,  0.0,-1.0, 0.0,  1.0, 1.0,
+            -hx, -hy, -hz,  0.0,-1.0, 0.0,  0.0, 1.0,
+            // Right face (x = +hx)
+             hx, -hy, -hz,  1.0, 0.0, 0.0,  0.0, 0.0,
+             hx,  hy, -hz,  1.0, 0.0, 0.0,  1.0, 0.0,
+             hx,  hy,  hz,  1.0, 0.0, 0.0,  1.0, 1.0,
+             hx, -hy,  hz,  1.0, 0.0, 0.0,  0.0, 1.0,
+            // Left face (x = -hx)
+            -hx, -hy,  hz, -1.0, 0.0, 0.0,  0.0, 0.0,
+            -hx,  hy,  hz, -1.0, 0.0, 0.0,  1.0, 0.0,
+            -hx,  hy, -hz, -1.0, 0.0, 0.0,  1.0, 1.0,
+            -hx, -hy, -hz, -1.0, 0.0, 0.0,  0.0, 1.0,
+        ];
+        
+        let indices: Vec<u32> = vec![
+            0, 1, 2, 0, 2, 3,       // Front
+            4, 5, 6, 4, 6, 7,       // Back
+            8, 9, 10, 8, 10, 11,    // Top
+            12, 13, 14, 12, 14, 15, // Bottom
+            16, 17, 18, 16, 18, 19, // Right
+            20, 21, 22, 20, 22, 23, // Left
+        ];
+        
+        self.vehicle_box_mesh = Some(Mesh::new(&self.gl, &vertices, &indices)?);
+        Ok(())
     }
     
     pub fn render(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -212,28 +295,48 @@ impl Renderer {
             }
         }
         
+        // === SPRINT 1: Render terrain mesh ===
+        if let Some(ref terrain_mesh) = self.terrain_mesh {
+            unsafe {
+                // Set model matrix to identity for terrain
+                if let Some(u_model) = self.gl.get_uniform_location(self.shader.program, "u_model") {
+                    let identity = Matrix4::identity();
+                    self.gl.uniform_matrix_4_f32_slice(Some(&u_model), false, identity.as_slice());
+                }
+            }
+            terrain_mesh.draw();
+        }
+        
+        // === SPRINT 1: Render vehicle as box ===
+        if let Some((pos, rot)) = self.vehicle_transform {
+            let model_matrix = rot.to_homogeneous().prepend_translation(&pos);
+            unsafe {
+                if let Some(u_model) = self.gl.get_uniform_location(self.shader.program, "u_model") {
+                    self.gl.uniform_matrix_4_f32_slice(Some(&u_model), false, model_matrix.as_slice());
+                }
+            }
+            if let Some(ref box_mesh) = self.vehicle_box_mesh {
+                box_mesh.draw();
+            }
+        }
+        
         // Render each visible object using appropriate LOD model
         for (_index, lod_model) in visible_objects {
             match lod_model {
                 crate::graphics::lod_system::LodModel::HighPoly { vertices, indices } => {
-                    // Create and render a temporary mesh for high-poly model
                     let mesh = Mesh::new(&self.gl, &vertices, &indices)?;
                     mesh.draw();
                 },
                 crate::graphics::lod_system::LodModel::MediumPoly { vertices, indices } => {
-                    // Create and render a temporary mesh for medium-poly model
                     let mesh = Mesh::new(&self.gl, &vertices, &indices)?;
                     mesh.draw();
                 },
                 crate::graphics::lod_system::LodModel::LowPoly { vertices, indices } => {
-                    // Create and render a temporary mesh for low-poly model
                     let mesh = Mesh::new(&self.gl, &vertices, &indices)?;
                     mesh.draw();
                 },
                 crate::graphics::lod_system::LodModel::Billboard { texture_id, size } => {
-                    // For billboards, we'd need to create quad geometry and apply the texture
-                    // This is a simplified approach - in a real engine, you'd want to optimize this
-                    // For now, just skip rendering since we don't have a texture reference here
+                    // Skip billboards for now
                 },
             }
         }
@@ -245,7 +348,110 @@ impl Renderer {
             }
         }
         
+        // === SPRINT 2: Render HUD ===
+        // HUD рисуется после основной сцены, без depth test
+        self.render_hud()?;
+        
         Ok(())
+    }
+    
+    /// Render HUD overlay (2D UI without depth test)
+    fn render_hud(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        use crate::ui::hud::HudFlashElement;
+        
+        // Get HUD data from renderer's stored data (set by engine via set_hud_data)
+        let hud_data = self.hud_data.clone().unwrap_or_else(|| crate::ui::hud::VehicleHudData {
+            speed_kmh: self.vehicle_transform
+                .map(|(_, _)| 65.0)  // placeholder if no data
+                .unwrap_or(0.0),
+            engine_rpm: 2200.0,
+            engine_rpm_max: 3200.0,
+            gear: crate::ui::hud::GearState::Drive(4),
+            engine_running: true,
+            fuel_level: 0.75,
+            ..Default::default()
+        });
+        
+        unsafe {
+            // Disable depth test for 2D UI
+            self.gl.disable(glow::DEPTH_TEST);
+            
+            // Use simple color for now (will use shader later)
+            self.gl.use_program(Some(self.shader.program));
+            
+            // Draw speed panel (bottom left rectangle)
+            self.draw_rect(10.0, self.height as f32 - 60.0, 200.0, 50.0, [0.1, 0.1, 0.1, 0.8]);
+            
+            // Draw speed value (simple representation)
+            let speed_text = format!("{:.0} km/h", hud_data.speed_kmh);
+            // Text rendering will be added later with bitmap font
+            
+            // Draw RPM bar
+            let rpm_ratio = (hud_data.engine_rpm / hud_data.engine_rpm_max).min(1.0);
+            let bar_width = 150.0 * rpm_ratio;
+            self.draw_rect(20.0, self.height as f32 - 40.0, bar_width, 10.0, [0.2, 0.8, 0.2, 1.0]);
+            
+            // Draw fuel bar
+            let fuel_width = 100.0 * hud_data.fuel_level;
+            self.draw_rect(20.0, self.height as f32 - 25.0, fuel_width, 8.0, [0.8, 0.8, 0.2, 1.0]);
+            
+            // Draw wheel contact indicators (4 dots)
+            for (i, &contact) in hud_data.wheel_contact.iter().enumerate() {
+                let x = 250.0 + (i as f32 * 20.0);
+                let y = self.height as f32 - 40.0;
+                let color = if contact { [0.0, 1.0, 0.0, 1.0] } else { [1.0, 0.0, 0.0, 1.0] };
+                // Using small rect instead of circle for simplicity
+                self.draw_rect(x - 6.0, y - 6.0, 12.0, 12.0, color);
+            }
+            
+            // Flash warning for low fuel
+            if hud_data.fuel_reserve {
+                self.draw_rect(150.0, self.height as f32 - 25.0, 100.0, 8.0, [1.0, 0.0, 0.0, 1.0]);
+            }
+            
+            // Re-enable depth test
+            self.gl.enable(glow::DEPTH_TEST);
+        }
+        
+        Ok(())
+    }
+    
+    /// Draw a 2D rectangle (simple quad)
+    unsafe fn draw_rect(&self, x: f32, y: f32, width: f32, height: f32, color: [f32; 4]) {
+        // Simple HUD rect drawing using triangle fan
+        // This is a placeholder - full implementation needs proper VAO/VBO setup
+        // For now we use a simple approach with pre-defined quad vertices
+        
+        let vertices: [f32; 16] = [
+            x, y,                    // bottom-left
+            x + width, y,            // bottom-right
+            x + width, y + height,   // top-right
+            x, y + height,           // top-left
+        ];
+        
+        // In full implementation: bind UI shader, set ortho projection, draw quad
+        // For Sprint 1 alpha: stub implementation
+    }
+    
+    /// Draw a 2D triangle (for minimap player icon)
+    unsafe fn draw_triangle(&self, x1: f32, y1: f32, x2: f32, y2: f32, x3: f32, y3: f32, color: [f32; 4]) {
+        // Placeholder for triangle drawing
+    }
+    
+    /// Draw text at position
+    unsafe fn draw_text(&self, text: &str, x: f32, y: f32, size: f32, color: [f32; 4]) {
+        // Placeholder for text rendering - needs bitmap font or signed distance field font
+        // For Sprint 1: stub implementation
+    }
+    
+    /// Get renderer width
+    pub fn get_width(&self) -> u32 {
+        self.width
+    }
+    
+    /// Get renderer height
+    pub fn get_height(&self) -> u32 {
+        self.height
     }
     
     fn render_world_creation(&self) -> Result<(), Box<dyn std::error::Error>> {

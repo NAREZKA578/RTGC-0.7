@@ -1,0 +1,228 @@
+use nalgebra::Vector3;
+
+/// Тип частицы
+#[derive(Clone, Copy)]
+pub enum ParticleType {
+    Rain,
+    Snow,
+    Dust,
+    Exhaust,
+    Splash,
+}
+
+/// Отдельная частица
+pub struct Particle {
+    pub position: Vector3<f32>,
+    pub velocity: Vector3<f32>,
+    pub lifetime: f32,         // Оставшееся время жизни
+    pub max_lifetime: f32,     // Полное время жизни
+    pub size: f32,
+    pub color: Vector3<f32>,
+    pub particle_type: ParticleType,
+    pub active: bool,
+}
+
+impl Particle {
+    pub fn new() -> Self {
+        Self {
+            position: Vector3::zeros(),
+            velocity: Vector3::zeros(),
+            lifetime: 0.0,
+            max_lifetime: 1.0,
+            size: 0.1,
+            color: Vector3::new(1.0, 1.0, 1.0),
+            particle_type: ParticleType::Dust,
+            active: false,
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.active = false;
+    }
+}
+
+/// Система частиц
+pub struct ParticleSystem {
+    particles: Vec<Particle>,
+    max_particles: usize,
+    gravity: Vector3<f32>,
+}
+
+impl ParticleSystem {
+    pub fn new(max_particles: usize) -> Self {
+        let mut particles = Vec::with_capacity(max_particles);
+        for _ in 0..max_particles {
+            particles.push(Particle::new());
+        }
+
+        Self {
+            particles,
+            max_particles,
+            gravity: Vector3::new(0.0, -9.81, 0.0),
+        }
+    }
+
+    /// Эмиттер дождя
+    pub fn emit_rain(&mut self, position: Vector3<f32>, intensity: f32, count: usize) {
+        let mut spawned = 0;
+        for i in 0..self.particles.len() {
+            if spawned >= count { break; }
+            if !self.particles[i].active {
+                let p = &mut self.particles[i];
+                p.position = Vector3::new(
+                    position.x + (rand_float() - 0.5) * 20.0,
+                    position.y + 10.0 + rand_float() * 5.0,
+                    position.z + (rand_float() - 0.5) * 20.0,
+                );
+                p.velocity = Vector3::new(0.0, -15.0 - rand_float() * 5.0, 0.0);
+                p.lifetime = 2.0;
+                p.max_lifetime = 2.0;
+                p.size = 0.05 + rand_float() * 0.05;
+                p.color = Vector3::new(0.6, 0.7, 0.8);
+                p.particle_type = ParticleType::Rain;
+                p.active = true;
+                spawned += 1;
+            }
+        }
+    }
+
+    /// Эмиттер пыли из-под колёс
+    pub fn emit_dust(&mut self, position: Vector3<f32>, velocity: Vector3<f32>, slip: f32) {
+        if slip < 0.2 { return; } // Только при сильном скольжении
+        
+        let count = ((slip - 0.2) * 50.0) as usize;
+        let mut spawned = 0;
+        
+        for i in 0..self.particles.len() {
+            if spawned >= count { break; }
+            if !self.particles[i].active {
+                let p = &mut self.particles[i];
+                p.position = position + Vector3::new(
+                    (rand_float() - 0.5) * 0.5,
+                    0.1,
+                    (rand_float() - 0.5) * 0.5,
+                );
+                p.velocity = Vector3::new(
+                    (rand_float() - 0.5) * 2.0,
+                    1.0 + rand_float() * 2.0,
+                    (rand_float() - 0.5) * 2.0,
+                ) + velocity * 0.3;
+                p.lifetime = 1.5 + rand_float();
+                p.max_lifetime = p.lifetime;
+                p.size = 0.2 + rand_float() * 0.3;
+                p.color = Vector3::new(0.7, 0.65, 0.5); // Коричневато-серый
+                p.particle_type = ParticleType::Dust;
+                p.active = true;
+                spawned += 1;
+            }
+        }
+    }
+
+    /// Эмиттер брызг (вода/грязь)
+    pub fn emit_splash(&mut self, position: Vector3<f32>, normal: Vector3<f32>, impact_speed: f32) {
+        if impact_speed < 2.0 { return; }
+        
+        let count = (impact_speed * 3.0) as usize;
+        let mut spawned = 0;
+        
+        for i in 0..self.particles.len() {
+            if spawned >= count { break; }
+            if !self.particles[i].active {
+                let p = &mut self.particles[i];
+                p.position = position;
+                
+                // Отражение от поверхности + разброс
+                let tangent = Vector3::new(normal.z, 0.0, -normal.x).normalize();
+                let bitangent = normal.cross(&tangent);
+                
+                p.velocity = normal * impact_speed * 0.5
+                    + tangent * (rand_float() - 0.5) * impact_speed
+                    + bitangent * (rand_float() - 0.5) * impact_speed;
+                    
+                p.lifetime = 0.5 + rand_float() * 0.5;
+                p.max_lifetime = p.lifetime;
+                p.size = 0.1 + rand_float() * 0.15;
+                p.color = Vector3::new(0.5, 0.4, 0.3); // Грязь
+                p.particle_type = ParticleType::Splash;
+                p.active = true;
+                spawned += 1;
+            }
+        }
+    }
+
+    /// Обновление всех частиц
+    pub fn update(&mut self, dt: f32) {
+        for p in &mut self.particles {
+            if !p.active { continue; }
+
+            p.lifetime -= dt;
+            if p.lifetime <= 0.0 {
+                p.active = false;
+                continue;
+            }
+
+            // Физика
+            match p.particle_type {
+                ParticleType::Rain => {
+                    // Дождь падает быстро, ветер не сильно влияет
+                    p.position += p.velocity * dt;
+                }
+                ParticleType::Snow => {
+                    // Снег падает медленно, сносится ветром
+                    p.position += p.velocity * dt;
+                    p.position.x += 0.5 * dt; // Ветер
+                }
+                ParticleType::Dust | ParticleType::Exhaust | ParticleType::Splash => {
+                    // Обычная физика с гравитацией и затуханием
+                    p.velocity += self.gravity * dt;
+                    p.velocity *= 0.95; // Сопротивление воздуха
+                    p.position += p.velocity * dt;
+                    
+                    // Коллизия с "землей" (упрощенно y=0)
+                    if p.position.y < 0.0 {
+                        p.position.y = 0.0;
+                        p.velocity.y = -p.velocity.y * 0.3; // Отскок
+                        p.velocity.x *= 0.5;
+                        p.velocity.z *= 0.5;
+                        
+                        if p.velocity.y.abs() < 0.1 {
+                            p.active = false;
+                        }
+                    }
+                }
+            }
+
+            // Уменьшение размера со временем (для пыли/дыма)
+            if p.particle_type == ParticleType::Dust || p.particle_type == ParticleType::Exhaust {
+                let t = p.lifetime / p.max_lifetime;
+                p.size *= 0.98;
+                p.color *= 0.99; // Выцветание
+            }
+        }
+    }
+
+    /// Получить активные частицы для рендеринга
+    pub fn get_active_particles(&self) -> impl Iterator<Item = &Particle> {
+        self.particles.iter().filter(|p| p.active)
+    }
+
+    pub fn get_active_count(&self) -> usize {
+        self.particles.iter().filter(|p| p.active).count()
+    }
+
+    pub fn clear(&mut self) {
+        for p in &mut self.particles {
+            p.active = false;
+        }
+    }
+}
+
+// Простая псевдо-случайная функция (заглушка до подключения rand)
+fn rand_float() -> f32 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .subsec_nanos() as f32;
+    (nanos / 1_000_000_000.0).fract()
+}

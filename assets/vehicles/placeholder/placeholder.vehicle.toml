@@ -1,0 +1,82 @@
+[metadata]
+id = "placeholder"
+name = "Тестовая машина"
+category = "truck"
+
+[body]
+mass_kg = 3000.0
+center_of_mass = [0.0, -0.3, 0.0]
+dimensions = [2.0, 1.6, 4.5]
+mesh = ""
+
+[engine]
+type = "diesel"
+max_power_kw = 150.0
+max_torque_nm = 600.0
+idle_rpm = 700.0
+max_rpm = 3200.0
+fuel_capacity_l = 120.0
+
+[transmission]
+type = "manual"
+gears = 5
+reverse_gears = 1
+gear_ratios = [4.5, 2.5, 1.5, 1.0, 0.7]
+reverse_ratio = 4.8
+final_drive = 5.5
+
+[drivetrain]
+type = "4x4"
+has_front_diff_lock = true
+has_rear_diff_lock = true
+has_center_diff_lock = false
+has_low_range = true
+low_range_ratio = 2.0
+
+[[wheels]]
+id = "front_left"
+position = [-0.9, -0.5, 1.4]
+radius_m = 0.4
+width_m = 0.3
+is_steerable = true
+is_driven = true
+max_steer_angle_deg = 35.0
+suspension_stiffness = 50000.0
+suspension_damping = 3000.0
+suspension_rest_length = 0.35
+
+[[wheels]]
+id = "front_right"
+position = [0.9, -0.5, 1.4]
+radius_m = 0.4
+width_m = 0.3
+is_steerable = true
+is_driven = true
+max_steer_angle_deg = 35.0
+suspension_stiffness = 50000.0
+suspension_damping = 3000.0
+suspension_rest_length = 0.35
+
+[[wheels]]
+id = "rear_left"
+position = [-0.9, -0.5, -1.2]
+radius_m = 0.4
+width_m = 0.3
+is_steerable = false
+is_driven = true
+max_steer_angle_deg = 0.0
+suspension_stiffness = 60000.0
+suspension_damping = 4000.0
+suspension_rest_length = 0.35
+
+[[wheels]]
+id = "rear_right"
+position = [0.9, -0.5, -1.2]
+radius_m = 0.4
+width_m = 0.3
+is_steerable = false
+is_driven = true
+max_steer_angle_deg = 0.0
+suspension_stiffness = 60000.0
+suspension_damping = 4000.0
+suspension_rest_length = 0.35
