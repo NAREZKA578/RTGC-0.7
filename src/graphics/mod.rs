@@ -10,6 +10,7 @@ pub mod lod_system;
 pub mod texture_streaming;
 pub mod lighting;
 pub mod rhi;
+pub mod material;
 
 pub use renderer::{Renderer, MenuState};
 pub use camera::Camera;
@@ -20,3 +21,4 @@ pub use lod_system::LodSystem;
 pub use texture_streaming::TextureStreamer;
 pub use lighting::{Light, LightManager, LightingConfig};
 pub use rhi::{RhiFactory, RhiConfig, IDevice, GraphicsBackend, RhiManager};
+pub use material::{Material, MaterialManager, MaterialLayers, MaterialParams, TextureQuality, MaterialStats};
