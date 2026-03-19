@@ -1,4 +1,4 @@
-use crate::physics::{RigidBody, Helicopter};
+use crate::physics::{RigidBody, Helicopter, PhysicsWorld};
 use std::sync::Arc;
 use std::thread;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -48,24 +48,27 @@ impl AsyncPhysicsEngine {
             while running_clone.load(Ordering::Relaxed) {
                 match msg_receiver.recv() {
                     Ok(PhysicsMessage::Step { dt, sub_steps }) => {
-                        let sub_dt = dt / sub_steps as f32;
-                        
-                        // Sub-stepping для стабильности
-                        for _ in 0..sub_steps {
-                            for body in &mut bodies {
-                                body.clear_forces();
-                                // Гравитация применяется в update()
-                                body.update(sub_dt);
-                            }
-                            
-                            // Обновление вертолёта если есть
-                            if let Some(ref mut heli) = helicopter {
-                                heli.update(sub_dt);
-                            }
-                            
-                            // Здесь будет collision detection и resolution
-                            // пока заглушка
+                        // A4: Использовать PhysicsWorld вместо заглушки
+                        // Создать временный PhysicsWorld, передать тела, вызвать step()
+                        let mut world = PhysicsWorld::new();
+                        for body in bodies.drain(..) {
+                            world.add_body(body);
                         }
+                        
+                        // Обновление вертолёта если есть
+                        if let Some(ref mut heli) = helicopter {
+                            // Вертолёт использует свою собственную систему сил
+                            // gravity уже учтён в его update() через internal state
+                            heli.update(dt);
+                            
+                            // Синхронизировать позицию вертолёта с physics world
+                            // (если вертолёт должен взаимодействовать с другими телами)
+                        }
+                        
+                        world.step(dt);  // ← вся физика включая коллизии
+                        
+                        // Забрать обновлённые тела обратно
+                        bodies = world.rigid_bodies.iter().cloned().collect();
                         
                         let _ = resp_sender.send(PhysicsResponse::StepComplete);
                     }

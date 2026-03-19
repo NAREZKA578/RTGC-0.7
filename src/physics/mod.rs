@@ -11,6 +11,7 @@ pub mod helicopter;
 pub mod advanced_vehicle;
 pub mod vehicle;
 pub mod deformable_terrain;
+pub mod constraints;
 
 pub use physics_module::{PhysicsWorld, RigidBody, Collider, PhysicsConfig};
 pub use arena_allocator::ArenaAllocator;
@@ -22,3 +23,4 @@ pub use helicopter::{Helicopter, HelicopterConfig, HelicopterControls};
 pub use advanced_vehicle::AdvancedVehicle;
 pub use vehicle::Vehicle;
 pub use deformable_terrain::DeformableTerrain;
+pub use constraints::{SpringConstraint, RaycastSuspension};

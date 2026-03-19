@@ -359,6 +359,35 @@ impl TerrainGenerator {
         (dx * dx + dz * dz).sqrt()
     }
     
+    /// Get surface normal at world coordinates
+    /// Uses central difference method for smooth normals
+    pub fn get_normal(&self, x: f32, z: f32) -> Vector3<f32> {
+        let sample_dist = 1.0; // Distance for finite difference
+        
+        // Get heights at neighboring points
+        let h_left = self.get_height(x - sample_dist, z);
+        let h_right = self.get_height(x + sample_dist, z);
+        let h_back = self.get_height(x, z - sample_dist);
+        let h_front = self.get_height(x, z + sample_dist);
+        
+        // Calculate tangent vectors using central differences
+        let tangent_x = Vector3::new(2.0 * sample_dist, h_right - h_left, 0.0);
+        let tangent_z = Vector3::new(0.0, h_front - h_back, 2.0 * sample_dist);
+        
+        // Cross product gives the normal
+        let mut normal = tangent_x.cross(&tangent_z);
+        
+        // Normalize
+        let len = normal.magnitude();
+        if len > 0.0001 {
+            normal /= len;
+        } else {
+            normal = Vector3::y(); // Default to up if flat
+        }
+        
+        normal
+    }
+    
     /// Generate splatmap weights for texturing
     fn generate_splatmap(&self, data: &mut ChunkData, idx: usize, biome: &Biome, slope: f32, moisture: f32) {
         // Simple splatmap: R=dirt, G=grass, B=rock, A=snow

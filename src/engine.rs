@@ -3,7 +3,7 @@ use winit::{
     keyboard::{KeyCode, PhysicalKey},
 };
 use std::sync::Arc;
-use crate::graphics::{GraphicsContext, gl_context::GlContext};
+use crate::graphics::{GraphicsContext, gl_context::GlContext, TextureQuality, MaterialManager};
 use crate::input::InputManager;
 use crate::audio::AudioSystem;
 use crate::ecs::EcsManager;
@@ -11,6 +11,8 @@ use crate::physics;
 use crate::graphics::renderer::MenuState;
 use crate::game::{Game, Animation, AnimationType};
 use crate::profiler;
+use crate::ui::HudManager;
+use crate::assets::VehicleLoader;
 
 pub struct Engine {
     pub graphics_context: GraphicsContext,
@@ -21,6 +23,13 @@ pub struct Engine {
     pub game: Option<Game>,
     gl_context: GlContext,
     last_frame_time: std::time::Instant,
+    // C1: Fixed timestep accumulator
+    physics_accumulator: f32,
+    physics_timestep: f32,
+    // HUD Manager
+    hud_manager: HudManager,
+    // Material Manager
+    material_manager: MaterialManager,
 }
 
 impl Engine {

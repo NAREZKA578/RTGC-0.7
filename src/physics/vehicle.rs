@@ -1,8 +1,7 @@
 //! Physics - Vehicle physics simulation
 
-use nalgebra::{Vector3, Quaternion, Matrix3};
-use crate::physics::rigid_body::RigidBody;
-use crate::physics::collider::ColliderShape;
+use nalgebra::{Vector3, Quaternion, Matrix3, UnitQuaternion};
+use crate::physics::physics_module::RigidBody;
 
 /// Vehicle configuration
 #[derive(Debug, Clone)]
@@ -136,20 +135,8 @@ pub struct Vehicle {
 impl Vehicle {
     /// Creates a new vehicle with the given configuration
     pub fn new(config: VehicleConfig) -> Self {
-        let mut body = RigidBody::new();
-        body.mass = config.mass;
-        body.inv_mass = if config.mass > 0.0 { 1.0 / config.mass } else { 0.0 };
+        let mut body = RigidBody::new_box(Vector3::zeros(), config.mass, Vector3::new(0.9, 0.3, 2.25));
         
-        // Calculate inertia tensor approximation for a box
-        let width = 1.8;
-        let height = 0.6;
-        let length = 4.5;
-        let ix = (config.mass / 12.0) * (height * height + length * length);
-        let iy = (config.mass / 12.0) * (width * width + length * length);
-        let iz = (config.mass / 12.0) * (width * width + height * height);
-        body.inertia_tensor = Matrix3::new_diagonal(&[ix, iy, iz]);
-        body.inv_inertia_tensor = body.inertia_tensor.try_inverse().unwrap_or(Matrix3::zeros());
-
         let mut wheels = Vec::with_capacity(config.wheel_count as usize);
         
         // Set up default 4-wheel configuration
@@ -198,8 +185,8 @@ impl Vehicle {
         // Apply aerodynamic drag
         self.apply_aerodynamics(dt);
 
-        // Integrate rigid body motion
-        self.body.integrate(dt);
+        // Integrate rigid body motion (use update method which includes full integration)
+        self.body.update(dt);
     }
 
     /// Updates a single wheel's physics
@@ -249,7 +236,7 @@ impl Vehicle {
             self.apply_tire_forces(wheel, wheel_index, dt);
             
             // Update wheel rotation based on vehicle speed
-            let linear_speed = self.body.linear_velocity.norm();
+            let linear_speed = self.body.velocity.norm();
             wheel.angular_velocity = linear_speed / self.config.wheel_radius;
         } else {
             wheel.suspension_compression = 0.0;
@@ -297,15 +284,15 @@ impl Vehicle {
 
     /// Applies aerodynamic forces
     fn apply_aerodynamics(&mut self, dt: f32) {
-        let speed_sq = self.body.linear_velocity.norm_squared();
-        let speed = self.body.linear_velocity.norm();
+        let speed_sq = self.body.velocity.norm_squared();
+        let speed = self.body.velocity.norm();
         
         if speed < 0.01 {
             return;
         }
         
         // Air drag
-        let drag_direction = -self.body.linear_velocity.normalize();
+        let drag_direction = -self.body.velocity.normalize();
         let drag_magnitude = 0.5 * 1.225 * self.config.drag_coefficient * 2.0 * speed_sq;
         let drag_force = drag_direction * drag_magnitude;
         
@@ -336,7 +323,7 @@ impl Vehicle {
 
     /// Gets the vehicle speed
     pub fn speed(&self) -> f32 {
-        self.body.linear_velocity.norm()
+        self.body.velocity.norm()
     }
 
     /// Gets the vehicle position
@@ -351,9 +338,7 @@ impl Vehicle {
 
     /// Resets the vehicle state
     pub fn reset(&mut self) {
-        self.body = RigidBody::new();
-        self.body.mass = self.config.mass;
-        self.body.inv_mass = 1.0 / self.config.mass;
+        self.body = RigidBody::new_box(Vector3::zeros(), self.config.mass, Vector3::new(0.9, 0.3, 2.25));
         
         for wheel in &mut self.wheels {
             wheel.suspension_compression = 0.0;

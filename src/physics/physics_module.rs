@@ -21,6 +21,33 @@ pub use helicopter::{Helicopter, HelicopterState, MainRotor, TailRotor, Turbosha
 pub use vehicle::{Vehicle, VehicleConfig, VehicleControls, WheelState};
 use tracing;
 
+// Collision layers (B4)
+pub const LAYER_WORLD: u32 = 0b0001;     // terrain, static objects
+pub const LAYER_VEHICLE: u32 = 0b0010;   // vehicles, player
+pub const LAYER_CARGO: u32 = 0b0100;     // cargo, pickups
+pub const LAYER_TRIGGER: u32 = 0b1000;   // trigger volumes (non-blocking)
+
+/// Contact event for sound and effects (B6)
+#[derive(Debug, Clone)]
+pub struct ContactEvent {
+    pub body_a: usize,
+    pub body_b: usize,
+    pub impact_velocity: f32,
+    pub contact_point: Vector3<f32>,
+    pub normal: Vector3<f32>,
+}
+
+/// Physics profiling statistics (C4)
+#[derive(Debug, Clone, Default)]
+pub struct PhysicsStats {
+    pub active_bodies: usize,
+    pub sleeping_bodies: usize,
+    pub broadphase_pairs: usize,
+    pub contacts_resolved: usize,
+    pub step_time_us: u64,
+    pub collision_events: usize,
+}
+
 #[derive(Debug, Clone)]
 pub enum Shape {
     Sphere { radius: f32 },
@@ -67,6 +94,16 @@ pub struct RigidBody {
     pub drag_coefficient: f32,
     pub lift_coefficient: f32,
     pub reference_area: f32,
+    // Sleep system fields (A3)
+    pub idle_timer: f32,
+    pub is_sleeping: bool,
+    // Collision layers (B4)
+    pub collision_layer: u32,
+    pub collision_mask: u32,
+    // Trigger volume (B5)
+    pub is_trigger: bool,
+    // CCD flag (B3)
+    pub enable_ccd: bool,
 }
 
 impl RigidBody {
@@ -113,6 +150,16 @@ impl RigidBody {
             drag_coefficient: 0.47,
             lift_coefficient: 0.0,
             reference_area: std::f32::consts::PI * radius * radius,
+            // Sleep system (A3)
+            idle_timer: 0.0,
+            is_sleeping: false,
+            // Collision layers (B4) - default to world layer
+            collision_layer: LAYER_WORLD,
+            collision_mask: LAYER_VEHICLE | LAYER_CARGO | LAYER_TRIGGER,
+            // Trigger volume (B5)
+            is_trigger: false,
+            // CCD flag (B3)
+            enable_ccd: false,
         }
     }
 
@@ -165,6 +212,16 @@ impl RigidBody {
             drag_coefficient: 1.05,
             lift_coefficient: 0.0,
             reference_area: 4.0 * half_extents.x * half_extents.y,
+            // Sleep system (A3)
+            idle_timer: 0.0,
+            is_sleeping: false,
+            // Collision layers (B4)
+            collision_layer: LAYER_WORLD,
+            collision_mask: LAYER_VEHICLE | LAYER_CARGO | LAYER_TRIGGER,
+            // Trigger volume (B5)
+            is_trigger: false,
+            // CCD flag (B3)
+            enable_ccd: false,
         }
     }
 
@@ -233,6 +290,16 @@ impl RigidBody {
             drag_coefficient: 0.82,
             lift_coefficient: 0.0,
             reference_area: std::f32::consts::PI * radius * radius,
+            // Sleep system (A3)
+            idle_timer: 0.0,
+            is_sleeping: false,
+            // Collision layers (B4)
+            collision_layer: LAYER_VEHICLE,
+            collision_mask: LAYER_WORLD | LAYER_CARGO,
+            // Trigger volume (B5)
+            is_trigger: false,
+            // CCD flag (B3) - enable for vehicles by default
+            enable_ccd: true,
         }
     }
 
@@ -262,6 +329,16 @@ impl RigidBody {
             drag_coefficient: 0.0,
             lift_coefficient: 0.0,
             reference_area: 0.0,
+            // Sleep system (A3) - terrain never sleeps
+            idle_timer: 0.0,
+            is_sleeping: false,
+            // Collision layers (B4) - world layer
+            collision_layer: LAYER_WORLD,
+            collision_mask: LAYER_VEHICLE | LAYER_CARGO,
+            // Trigger volume (B5)
+            is_trigger: false,
+            // CCD flag (B3) - terrain doesn't need CCD
+            enable_ccd: false,
         }
     }
 
@@ -329,6 +406,16 @@ impl RigidBody {
             drag_coefficient: 1.2,
             lift_coefficient: 0.0,
             reference_area: size.x * size.y,
+            // Sleep system (A3)
+            idle_timer: 0.0,
+            is_sleeping: false,
+            // Collision layers (B4)
+            collision_layer: LAYER_WORLD,
+            collision_mask: LAYER_VEHICLE | LAYER_CARGO,
+            // Trigger volume (B5)
+            is_trigger: false,
+            // CCD flag (B3)
+            enable_ccd: false,
         }
     }
 
@@ -453,6 +540,12 @@ impl RigidBody {
     pub fn get_world_transform(&self) -> Isometry3<f32> {
         Isometry3::from_parts(self.position.into(), self.rotation)
     }
+
+    /// Get velocity at a specific point on the rigid body
+    pub fn get_velocity_at_point(&self, point: Vector3<f32>) -> Vector3<f32> {
+        let r = point - self.position;
+        self.velocity + self.angular_velocity.cross(&r)
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -558,6 +651,16 @@ pub struct PhysicsWorld {
     thread_pool: ThreadPool,
     sleeping_threshold: f32,        // Velocity threshold for sleep activation
     deactivation_time: f32,         // Time before body goes to sleep
+    // Contact events (B6)
+    contact_events: Vec<ContactEvent>,
+    // Water plane for buoyancy (B7)
+    water_plane_y: Option<f32>,
+    // Profiling stats (C4)
+    pub stats: PhysicsStats,
+    // Spring constraints (B1)
+    pub spring_constraints: Vec<crate::physics::constraints::SpringConstraint>,
+    // Raycast suspensions (for vehicles without separate wheel bodies)
+    pub raycast_suspensions: Vec<crate::physics::constraints::RaycastSuspension>,
 }
 
 impl PhysicsWorld {
@@ -572,6 +675,16 @@ impl PhysicsWorld {
             thread_pool: ThreadPool::new(num_cpus::get()).expect("Failed to create thread pool"),
             sleeping_threshold: 0.01, // Bodies with velocity < 0.01 m/s can sleep
             deactivation_time: 1.0,   // Sleep after 1 second of inactivity
+            // Contact events (B6)
+            contact_events: Vec::new(),
+            // Water plane (B7) - no water by default
+            water_plane_y: None,
+            // Profiling stats (C4)
+            stats: PhysicsStats::default(),
+            // Spring constraints (B1)
+            spring_constraints: Vec::new(),
+            // Raycast suspensions
+            raycast_suspensions: Vec::new(),
         }
     }
 
@@ -618,23 +731,48 @@ impl PhysicsWorld {
     /// Main physics step with fixed timestep for deterministic simulation
     /// Uses Symplectic Euler integration for energy conservation
     pub fn step(&mut self, delta_time: f32) {
+        use std::time::Instant;
+        let step_start = Instant::now();
+        
         tracing::trace!("Starting physics step with delta_time: {}", delta_time);
         let sub_dt = self.time_step / self.sub_steps as f32;
+        
+        // Reset stats for this frame
+        self.stats.active_bodies = 0;
+        self.stats.sleeping_bodies = 0;
+        self.stats.contacts_resolved = 0;
+        self.stats.collision_events = 0;
+        
+        // Count active/sleeping bodies
+        for body in self.rigid_bodies.iter() {
+            if !body.is_static {
+                if body.is_sleeping {
+                    self.stats.sleeping_bodies += 1;
+                } else {
+                    self.stats.active_bodies += 1;
+                }
+            }
+        }
         
         for i in 0..self.sub_steps {
             tracing::trace!("Starting sub-step {}", i);
             
             // Step 1: Force integration - FIXED: sequential to avoid data races
             for body in self.rigid_bodies.iter_mut() {
-                if !body.is_static {
+                if !body.is_static && !body.is_sleeping {
                     // Apply gravity
                     body.apply_force(self.gravity * body.mass);
+                    
+                    // Apply buoyancy if water plane is set (B7)
+                    if let Some(water_y) = self.water_plane_y {
+                        self.apply_buoyancy(body, water_y);
+                    }
                 }
             }
             
             // Step 2: Update positions and orientations using Symplectic Euler - FIXED: sequential
             for body in self.rigid_bodies.iter_mut() {
-                if !body.is_static {
+                if !body.is_static && !body.is_sleeping {
                     body.update(sub_dt);
                     body.clear_forces(); // Clear forces after integration
                 }
@@ -642,6 +780,7 @@ impl PhysicsWorld {
             
             // Step 3: Broad phase collision detection
             self.broadphase_collision_detection();
+            self.stats.broadphase_pairs = self.broadphase_pairs.len();
             
             // Step 4: Narrow phase and collision resolution with Sequential Impulse Solver
             self.handle_collisions_parallel();
@@ -654,6 +793,10 @@ impl PhysicsWorld {
             
             tracing::trace!("Completed sub-step {}", i);
         }
+        
+        // Record step time
+        self.stats.step_time_us = step_start.elapsed().as_micros() as u64;
+        
         tracing::trace!("Completed physics step");
     }
 
@@ -662,8 +805,6 @@ impl PhysicsWorld {
         let threshold = self.sleeping_threshold;
         let deactivation_time = self.deactivation_time;
         
-        // FIXED: Sequential version to avoid data races with raw pointers
-        // TODO: Implement proper parallel sleeping body updates with thread-safe state
         for body in self.rigid_bodies.iter_mut() {
             if !body.is_static {
                 let velocity_magnitude = body.velocity.magnitude();
@@ -671,11 +812,14 @@ impl PhysicsWorld {
                 
                 if velocity_magnitude < threshold && angular_magnitude < threshold {
                     // Body is candidate for sleeping - increment idle timer
-                    // In production: body.idle_timer += dt;
-                    // if body.idle_timer > deactivation_time { body.sleep(); }
+                    body.idle_timer += dt;
+                    if body.idle_timer > deactivation_time {
+                        body.is_sleeping = true;
+                    }
                 } else {
                     // Reset idle timer if moving
-                    // body.idle_timer = 0.0;
+                    body.idle_timer = 0.0;
+                    body.is_sleeping = false;
                 }
             }
         }
@@ -759,6 +903,23 @@ impl PhysicsWorld {
         // Narrow phase collision detection using broadphase pairs
         for (i, j) in &self.broadphase_pairs {
             if let Some(contact) = self.detect_collision(*i, *j) {
+                // Generate contact event for sound/effects (B6)
+                let body_a_vel = self.rigid_bodies.get(*i).map(|b| b.velocity.magnitude()).unwrap_or(0.0);
+                let body_b_vel = self.rigid_bodies.get(*j).map(|b| b.velocity.magnitude()).unwrap_or(0.0);
+                let impact_velocity = (body_a_vel + body_b_vel) * 0.5;
+                
+                // Only create event if impact is significant
+                if impact_velocity > 0.1 {
+                    self.contact_events.push(ContactEvent {
+                        body_a: *i,
+                        body_b: *j,
+                        impact_velocity,
+                        contact_point: contact.contact_point,
+                        normal: contact.normal,
+                    });
+                    self.stats.collision_events += 1;
+                }
+                
                 contacts.push(contact);
             }
         }
@@ -776,6 +937,7 @@ impl PhysicsWorld {
         let bodies_slice = self.rigid_bodies.as_mut_slice();
         for contact in &contacts {
             Self::resolve_contact_sequential(contact, bodies_slice);
+            self.stats.contacts_resolved += 1;
         }
         tracing::trace!("Completed processing contacts");
     }
@@ -974,11 +1136,313 @@ impl PhysicsWorld {
                 // Capsule-capsule collision
                 self.detect_capsule_capsule_collision(i, j, body_a, body_b, *r1, *h1, *r2, *h2)
             }
+            // Terrain collisions
+            (Shape::Sphere { radius }, Shape::Terrain { height_map, scale }) => {
+                self.detect_sphere_terrain_collision(i, j, body_a, body_b, *radius, height_map, scale)
+            }
+            (Shape::Terrain { height_map, scale }, Shape::Sphere { radius }) => {
+                if let Some(mut contact) = self.detect_sphere_terrain_collision(j, i, body_b, body_a, *radius, height_map, scale) {
+                    std::mem::swap(&mut contact.body_a, &mut contact.body_b);
+                    contact.normal = -contact.normal;
+                    Some(contact)
+                } else {
+                    None
+                }
+            }
+            (Shape::Box { half_extents }, Shape::Terrain { height_map, scale }) => {
+                self.detect_box_terrain_collision(i, j, body_a, body_b, half_extents, height_map, scale)
+            }
+            (Shape::Terrain { height_map, scale }, Shape::Box { half_extents }) => {
+                if let Some(mut contact) = self.detect_box_terrain_collision(j, i, body_b, body_a, half_extents, height_map, scale) {
+                    std::mem::swap(&mut contact.body_a, &mut contact.body_b);
+                    contact.normal = -contact.normal;
+                    Some(contact)
+                } else {
+                    None
+                }
+            }
+            (Shape::Capsule { radius, height }, Shape::Terrain { height_map, scale }) => {
+                self.detect_capsule_terrain_collision(i, j, body_a, body_b, *radius, *height, height_map, scale)
+            }
+            (Shape::Terrain { height_map, scale }, Shape::Capsule { radius, height }) => {
+                if let Some(mut contact) = self.detect_capsule_terrain_collision(j, i, body_b, body_a, *radius, *height, height_map, scale) {
+                    std::mem::swap(&mut contact.body_a, &mut contact.body_b);
+                    contact.normal = -contact.normal;
+                    Some(contact)
+                } else {
+                    None
+                }
+            }
             _ => {
                 // For now, only handle specific shape combinations
-                // Complex shapes like meshes and terrains need special handling
+                // Complex shapes like meshes need special handling
                 None
             }
+        }
+    }
+
+    /// Detect collision between sphere and terrain
+    fn detect_sphere_terrain_collision(
+        &self,
+        i: usize,
+        j: usize,
+        sphere_body: &RigidBody,
+        terrain_body: &RigidBody,
+        radius: f32,
+        height_map: &Vec<Vec<f32>>,
+        scale: &Vector3<f32>,
+    ) -> Option<Contact> {
+        if height_map.is_empty() || height_map[0].is_empty() {
+            return None;
+        }
+
+        let sphere_x = sphere_body.position.x;
+        let sphere_z = sphere_body.position.z;
+        let sphere_y = sphere_body.position.y;
+
+        // Find the cell in the heightmap
+        let num_cells_x = height_map.len() - 1;
+        let num_cells_z = height_map[0].len() - 1;
+
+        // Convert world coordinates to heightmap cell coordinates
+        let cell_x_f = (sphere_x - terrain_body.position.x) / scale.x;
+        let cell_z_f = (sphere_z - terrain_body.position.z) / scale.z;
+
+        let cell_x = cell_x_f.floor() as usize;
+        let cell_z = cell_z_f.floor() as usize;
+
+        // Clamp to valid range
+        if cell_x >= num_cells_x || cell_z >= num_cells_z {
+            return None;
+        }
+
+        // Get heights at the four corners of the cell
+        let h00 = height_map[cell_x][cell_z];
+        let h10 = height_map[cell_x + 1][cell_z];
+        let h01 = height_map[cell_x][cell_z + 1];
+        let h11 = height_map[cell_x + 1][cell_z + 1];
+
+        // Bilinear interpolation to get exact height at sphere position
+        let local_x = cell_x_f - cell_x as f32;
+        let local_z = cell_z_f - cell_z as f32;
+
+        let h_bottom = h00 * (1.0 - local_x) + h10 * local_x;
+        let h_top = h01 * (1.0 - local_x) + h11 * local_x;
+        let terrain_height = h_bottom * (1.0 - local_z) + h_top * local_z;
+
+        // Check if sphere is below terrain surface
+        let distance_to_surface = sphere_y - terrain_height;
+        
+        if distance_to_surface < radius {
+            // Collision detected
+            let penetration_depth = radius - distance_to_surface;
+            
+            // Calculate normal using finite differences
+            let sample_dist = scale.x * 0.5;
+            let h_left = self.sample_heightmap(height_map, scale, &terrain_body.position, sphere_x - sample_dist, sphere_z);
+            let h_right = self.sample_heightmap(height_map, scale, &terrain_body.position, sphere_x + sample_dist, sphere_z);
+            let h_back = self.sample_heightmap(height_map, scale, &terrain_body.position, sphere_x, sphere_z - sample_dist);
+            let h_front = self.sample_heightmap(height_map, scale, &terrain_body.position, sphere_x, sphere_z + sample_dist);
+
+            let tangent_x = Vector3::new(2.0 * sample_dist, h_right - h_left, 0.0);
+            let tangent_z = Vector3::new(0.0, h_front - h_back, 2.0 * sample_dist);
+            let mut normal = tangent_x.cross(&tangent_z);
+            let len = normal.magnitude();
+            if len > 0.0001 {
+                normal /= len;
+            } else {
+                normal = Vector3::y();
+            }
+
+            let contact_point = sphere_body.position - normal * (radius - penetration_depth * 0.5);
+
+            Some(Contact {
+                body_a: i,
+                body_b: j,
+                contact_point,
+                normal,
+                penetration_depth,
+                restitution: (sphere_body.restitution + terrain_body.restitution) / 2.0,
+                friction: (sphere_body.friction + terrain_body.friction) / 2.0,
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Helper function to sample heightmap with bilinear interpolation
+    fn sample_heightmap(
+        &self,
+        height_map: &Vec<Vec<f32>>,
+        scale: &Vector3<f32>,
+        terrain_pos: &Vector3<f32>,
+        world_x: f32,
+        world_z: f32,
+    ) -> f32 {
+        if height_map.is_empty() || height_map[0].is_empty() {
+            return 0.0;
+        }
+
+        let num_cells_x = height_map.len() - 1;
+        let num_cells_z = height_map[0].len() - 1;
+
+        let cell_x_f = (world_x - terrain_pos.x) / scale.x;
+        let cell_z_f = (world_z - terrain_pos.z) / scale.z;
+
+        let cell_x = cell_x_f.floor() as usize;
+        let cell_z = cell_z_f.floor() as usize;
+
+        if cell_x >= num_cells_x || cell_z >= num_cells_z {
+            return 0.0;
+        }
+
+        let local_x = cell_x_f - cell_x as f32;
+        let local_z = cell_z_f - cell_z as f32;
+
+        let h00 = height_map[cell_x][cell_z];
+        let h10 = height_map[cell_x + 1][cell_z];
+        let h01 = height_map[cell_x][cell_z + 1];
+        let h11 = height_map[cell_x + 1][cell_z + 1];
+
+        let h_bottom = h00 * (1.0 - local_x) + h10 * local_x;
+        let h_top = h01 * (1.0 - local_x) + h11 * local_x;
+        h_bottom * (1.0 - local_z) + h_top * local_z
+    }
+
+    /// Detect collision between box and terrain
+    fn detect_box_terrain_collision(
+        &self,
+        i: usize,
+        j: usize,
+        box_body: &RigidBody,
+        terrain_body: &RigidBody,
+        half_extents: &Vector3<f32>,
+        height_map: &Vec<Vec<f32>>,
+        scale: &Vector3<f32>,
+    ) -> Option<Contact> {
+        if height_map.is_empty() || height_map[0].is_empty() {
+            return None;
+        }
+
+        // Get the 4 bottom corners of the box in world space
+        let corners = [
+            Vector3::new(-half_extents.x, -half_extents.y, -half_extents.z),
+            Vector3::new(half_extents.x, -half_extents.y, -half_extents.z),
+            Vector3::new(-half_extents.x, -half_extents.y, half_extents.z),
+            Vector3::new(half_extents.x, -half_extents.y, half_extents.z),
+        ];
+
+        let transform = box_body.get_world_transform();
+        let mut deepest_penetration = 0.0;
+        let mut deepest_contact_point = Vector3::zeros();
+        let mut deepest_normal = Vector3::y();
+
+        for corner_local in &corners {
+            let corner_world = transform.transform_point(&Point3::from(*corner_local)).coords;
+            
+            let terrain_height = self.sample_heightmap(height_map, scale, &terrain_body.position, corner_world.x, corner_world.z);
+            
+            let penetration = terrain_height - corner_world.y;
+            
+            if penetration > deepest_penetration {
+                deepest_penetration = penetration;
+                deepest_contact_point = corner_world;
+                
+                // Calculate normal at this point
+                let sample_dist = scale.x * 0.5;
+                let h_left = self.sample_heightmap(height_map, scale, &terrain_body.position, corner_world.x - sample_dist, corner_world.z);
+                let h_right = self.sample_heightmap(height_map, scale, &terrain_body.position, corner_world.x + sample_dist, corner_world.z);
+                let h_back = self.sample_heightmap(height_map, scale, &terrain_body.position, corner_world.x, corner_world.z - sample_dist);
+                let h_front = self.sample_heightmap(height_map, scale, &terrain_body.position, corner_world.x, corner_world.z + sample_dist);
+
+                let tangent_x = Vector3::new(2.0 * sample_dist, h_right - h_left, 0.0);
+                let tangent_z = Vector3::new(0.0, h_front - h_back, 2.0 * sample_dist);
+                let mut normal = tangent_x.cross(&tangent_z);
+                let len = normal.magnitude();
+                if len > 0.0001 {
+                    normal /= len;
+                } else {
+                    normal = Vector3::y();
+                }
+                deepest_normal = normal;
+            }
+        }
+
+        if deepest_penetration > 0.0 {
+            Some(Contact {
+                body_a: i,
+                body_b: j,
+                contact_point: deepest_contact_point,
+                normal: deepest_normal,
+                penetration_depth: deepest_penetration,
+                restitution: (box_body.restitution + terrain_body.restitution) / 2.0,
+                friction: (box_body.friction + terrain_body.friction) / 2.0,
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Detect collision between capsule and terrain
+    fn detect_capsule_terrain_collision(
+        &self,
+        i: usize,
+        j: usize,
+        capsule_body: &RigidBody,
+        terrain_body: &RigidBody,
+        radius: f32,
+        height: f32,
+        height_map: &Vec<Vec<f32>>,
+        scale: &Vector3<f32>,
+    ) -> Option<Contact> {
+        if height_map.is_empty() || height_map[0].is_empty() {
+            return None;
+        }
+
+        // Check the bottom hemisphere of the capsule
+        let capsule_bottom_y = capsule_body.position.y - height / 2.0;
+        
+        let terrain_height = self.sample_heightmap(height_map, scale, &terrain_body.position, capsule_body.position.x, capsule_body.position.z);
+        
+        let distance_to_surface = capsule_bottom_y - terrain_height;
+        
+        if distance_to_surface < radius {
+            let penetration_depth = radius - distance_to_surface;
+            
+            // Calculate normal
+            let sample_dist = scale.x * 0.5;
+            let h_left = self.sample_heightmap(height_map, scale, &terrain_body.position, capsule_body.position.x - sample_dist, capsule_body.position.z);
+            let h_right = self.sample_heightmap(height_map, scale, &terrain_body.position, capsule_body.position.x + sample_dist, capsule_body.position.z);
+            let h_back = self.sample_heightmap(height_map, scale, &terrain_body.position, capsule_body.position.x, capsule_body.position.z - sample_dist);
+            let h_front = self.sample_heightmap(height_map, scale, &terrain_body.position, capsule_body.position.x, capsule_body.position.z + sample_dist);
+
+            let tangent_x = Vector3::new(2.0 * sample_dist, h_right - h_left, 0.0);
+            let tangent_z = Vector3::new(0.0, h_front - h_back, 2.0 * sample_dist);
+            let mut normal = tangent_x.cross(&tangent_z);
+            let len = normal.magnitude();
+            if len > 0.0001 {
+                normal /= len;
+            } else {
+                normal = Vector3::y();
+            }
+
+            let contact_point = Vector3::new(
+                capsule_body.position.x,
+                terrain_height,
+                capsule_body.position.z,
+            );
+
+            Some(Contact {
+                body_a: i,
+                body_b: j,
+                contact_point,
+                normal,
+                penetration_depth,
+                restitution: (capsule_body.restitution + terrain_body.restitution) / 2.0,
+                friction: (capsule_body.friction + terrain_body.friction) / 2.0,
+            })
+        } else {
+            None
         }
     }
 
@@ -1528,6 +1992,9 @@ impl PhysicsWorld {
         // Use sequential version to avoid data races
         // TODO: Implement proper parallel constraint solver with disjoint sets
         self.solve_constraints_sequential();
+        
+        // Solve spring constraints (B1)
+        self.solve_spring_constraints(self.time_step / self.sub_steps as f32);
     }
 
     // Raycasting methods
@@ -1885,6 +2352,112 @@ impl Shape {
             Shape::Mesh { vertices, indices } => Some((vertices, indices)),
             _ => None,
         }
+    }
+}
+
+// ============================================
+// Contact event accessors (B6)
+// ============================================
+
+impl PhysicsWorld {
+    /// Get contact events from last physics step
+    pub fn get_contact_events(&self) -> &[ContactEvent] {
+        &self.contact_events
+    }
+
+    /// Clear contact events after processing
+    pub fn clear_contact_events(&mut self) {
+        self.contact_events.clear();
+    }
+
+    /// Set water plane for buoyancy simulation (B7)
+    pub fn set_water_plane(&mut self, water_y: f32) {
+        self.water_plane_y = Some(water_y);
+    }
+
+    /// Remove water plane
+    pub fn remove_water_plane(&mut self) {
+        self.water_plane_y = None;
+    }
+
+    /// Apply buoyancy force to a body (B7)
+    fn apply_buoyancy(&mut self, body: &mut RigidBody, water_y: f32) {
+        // Simple buoyancy model: Archimedes principle
+        // F_buoyancy = -ρ * V_submerged * g
+        // For simplicity, assume body is a sphere/box and calculate submerged volume
+        
+        let body_height = match &body.shape {
+            Shape::Sphere { radius } => *radius * 2.0,
+            Shape::Box { half_extents } => half_extents.y * 2.0,
+            Shape::Capsule { radius, height } => *height + *radius * 2.0,
+            _ => 1.0,
+        };
+        
+        let body_top = body.position.y + body_height / 2.0;
+        let body_bottom = body.position.y - body_height / 2.0;
+        
+        // Check if body intersects water surface
+        if body_bottom < water_y && body_top > water_y {
+            // Calculate submerged fraction (0..1)
+            let submerged_depth = water_y - body_bottom;
+            let submerged_fraction = (submerged_depth / body_height).clamp(0.0, 1.0);
+            
+            // Calculate displaced volume (approximate)
+            let total_volume = match &body.shape {
+                Shape::Sphere { radius } => (4.0 / 3.0) * std::f32::consts::PI * radius.powi(3),
+                Shape::Box { half_extents } => 8.0 * half_extents.x * half_extents.y * half_extents.z,
+                Shape::Capsule { radius, height } => {
+                    let cylinder_vol = std::f32::consts::PI * radius.powi(2) * height;
+                    let sphere_vol = (4.0 / 3.0) * std::f32::consts::PI * radius.powi(3);
+                    cylinder_vol + sphere_vol
+                }
+                _ => 1.0,
+            };
+            
+            let displaced_volume = total_volume * submerged_fraction;
+            
+            // Water density ~1000 kg/m³
+            let water_density = 1000.0;
+            
+            // Buoyancy force = displaced volume * density * gravity
+            let buoyancy_force = water_density * displaced_volume * 9.81;
+            
+            // Apply upward force at center of buoyancy (slightly above center of mass)
+            let buoyancy_point = body.position + Vector3::new(0.0, body_height * 0.1, 0.0);
+            body.apply_force_at_point(Vector3::new(0.0, buoyancy_force, 0.0), buoyancy_point);
+            
+            // Add linear drag for water resistance
+            let water_drag = 0.95;
+            body.velocity *= water_drag;
+            body.angular_velocity *= water_drag;
+        } else if body_top < water_y {
+            // Fully submerged
+            let total_volume = match &body.shape {
+                Shape::Sphere { radius } => (4.0 / 3.0) * std::f32::consts::PI * radius.powi(3),
+                Shape::Box { half_extents } => 8.0 * half_extents.x * half_extents.y * half_extents.z,
+                Shape::Capsule { radius, height } => {
+                    let cylinder_vol = std::f32::consts::PI * radius.powi(2) * height;
+                    let sphere_vol = (4.0 / 3.0) * std::f32::consts::PI * radius.powi(3);
+                    cylinder_vol + sphere_vol
+                }
+                _ => 1.0,
+            };
+            
+            let water_density = 1000.0;
+            let buoyancy_force = water_density * total_volume * 9.81;
+            
+            body.apply_force(Vector3::new(0.0, buoyancy_force, 0.0));
+            
+            // Stronger drag when fully submerged
+            let water_drag = 0.90;
+            body.velocity *= water_drag;
+            body.angular_velocity *= water_drag;
+        }
+    }
+
+    /// Get physics statistics for profiling (C4)
+    pub fn get_stats(&self) -> &PhysicsStats {
+        &self.stats
     }
 }
 
