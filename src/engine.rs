@@ -10,13 +10,14 @@ use crate::audio::AudioSystem;
 use crate::ecs::EcsManager;
 use crate::physics;
 use crate::graphics::renderer::MenuState;
-use crate::game::{WeatherSystem, DayNightCycle, Cargo, Winch};
+use crate::game::{WeatherSystem, DayNightCycle, Cargo, Winch, MissionGenerator, Mission};
 use crate::graphics::particles::ParticleSystem;
 use crate::graphics::debug_renderer::DebugRenderer;
 use crate::profiler;
 use crate::ui::HudManager;
 use crate::assets::VehicleLoader;
-use crate::world::{TerrainGenerator, ChunkId, generate_chunk_mesh, TerrainVertex, CHUNK_SIZE, HEIGHTMAP_RESOLUTION};
+use crate::world::{OpenWorld, ChunkId, generate_chunk_mesh, TerrainVertex, CHUNK_SIZE, HEIGHTMAP_RESOLUTION};
+use crate::world::{Settlement, RoadNetwork, BuildingPlacer};
 use nalgebra::{Vector3, UnitQuaternion, Matrix4};
 use crate::physics::Vehicle;
 
@@ -38,8 +39,13 @@ pub struct Engine {
     hud_manager: HudManager,
     // Material Manager
     material_manager: MaterialManager,
-    // Terrain & Vehicle (Sprint 1)
-    terrain_generator: Option<TerrainGenerator>,
+    // МИР-0: OpenWorld вместо ручного TerrainGenerator
+    open_world: Option<OpenWorld>,
+    world_seed: u64,
+    settlements: Vec<Settlement>,
+    road_network: Option<RoadNetwork>,
+    mission_generator: Option<MissionGenerator>,
+    current_mission: Option<Mission>,
     vehicle_chassis_id: Option<usize>,
     chunk_mesh_data: Option<(Vec<f32>, Vec<u32>)>,  // vertices, indices for terrain
     // Sprint 5: Weather, Day/Night, Particles, Debug
@@ -70,17 +76,39 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(event_loop: &winit::event_loop::EventLoop<()>) -> Result<Self, Box<dyn std::error::Error>> {
-        // === SPRINT 1: Create terrain and vehicle ===
+        // === МИР-0: Создаём OpenWorld с процедурной генерацией ===
+        let world_seed = 12345u64;  // Можно сделать настраиваемым
         
-        // 1. Create terrain generator
-        let terrain_gen = TerrainGenerator::new(Default::default());
+        // 1. Создаём OpenWorld (включает TerrainGenerator внутри)
+        let mut open_world = OpenWorld::new(world_seed);
         
-        // 2. Generate starting chunk
+        // 2. Генерируем дорожную сеть и поселения
+        use crate::world::{Settlement, RoadNetwork};
+        
+        // Генерируем несколько поселений вокруг старта
+        let mut settlements = Vec::new();
+        for gx in -2..=2 {
+            for gz in -2..=2 {
+                if let Some(settlement) = Settlement::generate(world_seed, gx, gz) {
+                    settlements.push(settlement);
+                }
+            }
+        }
+        
+        // Строим дорожную сеть между поселениями
+        let road_network = RoadNetwork::generate_from_settlements(&settlements, world_seed);
+        
+        // Передаём дорожную сеть в генератор terrain для влияния на высоты
+        open_world.generator_mut().set_road_network(road_network.clone());
+        
+        // 3. Создаём MissionGenerator из инфраструктуры
+        let mission_generator = Some(MissionGenerator::new(settlements.clone(), road_network.clone()));
+        
+        // 4. Генерируем стартовый чанк для физики
         let chunk_id = ChunkId::new(0, 0);
-        let chunk_data = terrain_gen.generate_chunk(chunk_id);
+        let chunk_data = open_world.generator().generate_chunk(chunk_id);
         
-        // 3. Convert heights to format expected by RigidBody::new_terrain
-        // The heightmap is HEIGHTMAP_RESOLUTION x HEIGHTMAP_RESOLUTION
+        // 5. Convert heights to format expected by RigidBody::new_terrain
         let mut height_map: Vec<Vec<f32>> = Vec::with_capacity(HEIGHTMAP_RESOLUTION as usize);
         for z in 0..HEIGHTMAP_RESOLUTION as usize {
             let mut row = Vec::with_capacity(HEIGHTMAP_RESOLUTION as usize);
@@ -94,7 +122,7 @@ impl Engine {
         // Create physics world first (no GL context needed)
         let mut physics_world = physics::PhysicsWorld::new();
         
-        // 4. Create terrain body and add to physics world
+        // 6. Create terrain body and add to physics world
         let terrain_body = physics::RigidBody::new_terrain(
             Vector3::zeros(),
             height_map,
@@ -102,7 +130,7 @@ impl Engine {
         );
         physics_world.add_body(terrain_body);
         
-        // 5. Create vehicle chassis and Vehicle physics
+        // 7. Create vehicle chassis and Vehicle physics
         let vehicle_config = VehicleLoader::create_default_vehicle("starter");
         let chassis_half_extents = Vector3::new(
             vehicle_config.body_config.dimensions[0] / 2.0,
@@ -125,7 +153,7 @@ impl Engine {
         v.set_position(Vector3::new(0.0, 10.0, 0.0));
         let vehicle = Some(v);
         
-        // 6. Generate terrain mesh data for renderer
+        // 8. Generate terrain mesh data for renderer
         let (vertices, indices) = generate_chunk_mesh(&chunk_data, 0);
         let flat_vertices: Vec<f32> = vertices.iter()
             .flat_map(|v| [
@@ -176,7 +204,12 @@ impl Engine {
             physics_timestep: PHYSICS_TIMESTEP,
             hud_manager: HudManager::new(),
             material_manager: MaterialManager::new(),
-            terrain_generator: Some(terrain_gen),
+            open_world: Some(open_world),
+            world_seed,
+            settlements,
+            road_network: Some(road_network),
+            mission_generator,
+            current_mission: None,
             vehicle_chassis_id: Some(chassis_id),
             chunk_mesh_data: Some((flat_vertices, indices)),
             // Sprint 5: Weather, Day/Night, Particles, Debug
@@ -549,8 +582,9 @@ impl Engine {
                             self.vehicle_steering,
                             0.0,
                         ));
-                        if let Some(ref gen) = self.terrain_generator {
-                            let h = |x: f32, z: f32| gen.get_height(x, z);
+                        // Получить высоту из OpenWorld
+                        if let Some(ref open_world) = self.open_world {
+                            let h = |x: f32, z: f32| open_world.get_generator().get_height(x, z);
                             vehicle.update(PHYSICS_TIMESTEP, h);
                         }
                         // Синхронизировать chassis body в PhysicsWorld

@@ -13,6 +13,7 @@ pub mod engine;
 pub mod world;
 pub mod weather;
 pub mod game;
+pub mod network;
 
 pub use assets::*;
 pub use config::*;
@@ -27,6 +28,7 @@ pub use engine::*;
 pub use world::*;
 pub use weather::*;
 pub use game::*;
+pub use network::*;
 
 // Core engine types re-export
 pub use nalgebra;
