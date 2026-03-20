@@ -13,7 +13,22 @@ uniform vec3 u_view_pos;
 uniform vec3 u_light_color;
 uniform float u_ambient_intensity;
 
+// Исп-7: Поддержка solid color для HUD
+uniform vec4 u_color;
+uniform bool u_use_solid_color;
+
+// Задача 10: Fog (туман дистанции)
+uniform float u_fog_start;
+uniform float u_fog_end;
+uniform vec3 u_fog_color;
+
 void main() {
+    // Исп-7: Если режим solid color - просто вернуть цвет
+    if (u_use_solid_color) {
+        FragColor = u_color;
+        return;
+    }
+
     // Determine color based on height and biome
     vec3 color;
     
@@ -63,5 +78,11 @@ void main() {
     vec3 specular = specular_strength * spec * u_light_color;
     
     vec3 result = (ambient + diffuse + specular) * color;
+    
+    // Задача 10: Туман по расстоянию от камеры
+    float dist = length(frag_position - u_view_pos);
+    float fog_factor = clamp((dist - u_fog_start) / (u_fog_end - u_fog_start), 0.0, 1.0);
+    result = mix(result, u_fog_color, fog_factor);
+    
     FragColor = vec4(result, 1.0);
 }

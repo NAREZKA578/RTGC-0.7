@@ -1,4 +1,5 @@
 use nalgebra::Vector3;
+use glow::Context;
 
 /// Тип частицы
 #[derive(Clone, Copy)]
@@ -59,6 +60,51 @@ impl ParticleSystem {
             particles,
             max_particles,
             gravity: Vector3::new(0.0, -9.81, 0.0),
+        }
+    }
+
+    /// Задача 6: Рендеринг частиц в GL
+    pub fn render(&self, gl: &Context, view_proj: nalgebra::Matrix4<f32>) {
+        let active: Vec<&Particle> = self.get_active_particles().collect();
+        if active.is_empty() { return; }
+
+        unsafe {
+            let vao = gl.create_vertex_array().ok();
+            let vbo = gl.create_buffer().ok();
+            
+            if let (Some(vao), Some(vbo)) = (vao, vbo) {
+                // Формат вершины: x, y, z, r, g, b, size (7 floats)
+                let vertices: Vec<f32> = active.iter()
+                    .flat_map(|p| [
+                        p.position.x, p.position.y, p.position.z,
+                        p.color[0], p.color[1], p.color[2],
+                        p.size,
+                    ])
+                    .collect();
+                
+                gl.bind_vertex_array(Some(vao));
+                gl.bind_buffer(glow::ARRAY_BUFFER, Some(vbo));
+                gl.buffer_data_u8_slice(
+                    glow::ARRAY_BUFFER,
+                    bytemuck::cast_slice(&vertices),
+                    glow::STREAM_DRAW,
+                );
+                
+                // Position attribute (location 0) - 3 floats
+                gl.enable_vertex_attrib_array(0);
+                gl.vertex_attrib_pointer_f32(0, 3, glow::FLOAT, false, 28, 0);
+                // Color attribute (location 1) - 3 floats
+                gl.enable_vertex_attrib_array(1);
+                gl.vertex_attrib_pointer_f32(1, 3, glow::FLOAT, false, 28, 12);
+                // Size attribute (location 2) - 1 float
+                gl.enable_vertex_attrib_array(2);
+                gl.vertex_attrib_pointer_f32(2, 1, glow::FLOAT, false, 28, 24);
+                
+                gl.draw_arrays(glow::POINTS, 0, active.len() as i32);
+                
+                gl.delete_vertex_array(vao);
+                gl.delete_buffer(vbo);
+            }
         }
     }
 

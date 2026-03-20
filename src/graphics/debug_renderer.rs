@@ -1,4 +1,4 @@
-use nalgebra::{Vector3, Point3};
+use nalgebra::{Vector3, Point3, Matrix4};
 use glow::Context;
 
 /// Отладочный рендерер для визуализации физики
@@ -27,6 +27,40 @@ impl DebugRenderer {
 
     /// Очистить все накопленные примитивы
     pub fn clear(&mut self) {
+        self.line_vertices.clear();
+        self.point_vertices.clear();
+    }
+
+    /// Задача 5: Отрисовать линии в GL
+    pub fn flush_to_gl(&mut self, gl: &Context, view_proj: Matrix4<f32>) {
+        if self.line_vertices.is_empty() { return; }
+        
+        unsafe {
+            let vao = gl.create_vertex_array().ok();
+            let vbo = gl.create_buffer().ok();
+            
+            if let (Some(vao), Some(vbo)) = (vao, vbo) {
+                gl.bind_vertex_array(Some(vao));
+                gl.bind_buffer(glow::ARRAY_BUFFER, Some(vbo));
+                gl.buffer_data_u8_slice(
+                    glow::ARRAY_BUFFER,
+                    bytemuck::cast_slice(&self.line_vertices),
+                    glow::STREAM_DRAW,
+                );
+                
+                // Position attribute (location 0) - 3 floats
+                gl.enable_vertex_attrib_array(0);
+                gl.vertex_attrib_pointer_f32(0, 3, glow::FLOAT, false, 24, 0);
+                // Color attribute (location 1) - 3 floats
+                gl.enable_vertex_attrib_array(1);
+                gl.vertex_attrib_pointer_f32(1, 3, glow::FLOAT, false, 24, 12);
+                
+                gl.draw_arrays(glow::LINES, 0, (self.line_vertices.len() / 6) as i32);
+                
+                gl.delete_vertex_array(vao);
+                gl.delete_buffer(vbo);
+            }
+        }
         self.line_vertices.clear();
         self.point_vertices.clear();
     }
