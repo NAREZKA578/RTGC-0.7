@@ -18,6 +18,7 @@ use crate::ui::HudManager;
 use crate::assets::VehicleLoader;
 use crate::world::{TerrainGenerator, ChunkId, generate_chunk_mesh, TerrainVertex, CHUNK_SIZE, HEIGHTMAP_RESOLUTION};
 use nalgebra::{Vector3, UnitQuaternion, Matrix4};
+use crate::physics::Vehicle;
 
 // Fixed timestep for physics (60 Hz)
 const PHYSICS_TIMESTEP: f32 = 1.0 / 60.0;
@@ -54,6 +55,8 @@ pub struct Engine {
     vehicle_throttle: f32,
     vehicle_steering: f32,
     vehicle_brake: f32,
+    // Задача 1: Vehicle как поле Engine
+    vehicle: Option<Vehicle>,
 }
 
 impl Engine {
@@ -90,7 +93,7 @@ impl Engine {
         );
         physics_world.add_body(terrain_body);
         
-        // 5. Create vehicle chassis
+        // 5. Create vehicle chassis and Vehicle physics
         let vehicle_config = VehicleLoader::create_default_vehicle("starter");
         let chassis_half_extents = Vector3::new(
             vehicle_config.body_config.dimensions[0] / 2.0,
@@ -106,6 +109,12 @@ impl Engine {
         chassis.collision_mask = physics::LAYER_WORLD | physics::LAYER_CARGO;
         chassis.enable_ccd = true;
         let chassis_id = physics_world.add_body(chassis);
+        
+        // Исп-2: Создать Vehicle для управления физикой
+        let vc = crate::assets::VehicleLoader::to_vehicle_config(&vehicle_config);
+        let mut v = Vehicle::new(vc);
+        v.set_position(Vector3::new(0.0, 10.0, 0.0));
+        let vehicle = Some(v);
         
         // 6. Generate terrain mesh data for renderer
         let (vertices, indices) = generate_chunk_mesh(&chunk_data, 0);
@@ -127,10 +136,18 @@ impl Engine {
         let graphics_context = GraphicsContext::new(window, gl.clone())?;
         let input_manager = InputManager::new();
         let audio_system = AudioSystem::new()?;
+        
+        // Исп-6: Загрузить звуки при старте
+        let _ = audio_system.engine.lock().unwrap().load_sound("assets/audio/engine_idle.wav");
+        let _ = audio_system.engine.lock().unwrap().load_sound("assets/audio/engine_accel.wav");
+        let _ = audio_system.engine.lock().unwrap().load_sound("assets/audio/brake.wav");
+        let _ = audio_system.engine.lock().unwrap().load_sound("assets/audio/crash.wav");
+        let _ = audio_system.engine.lock().unwrap().load_sound("assets/audio/winch.wav");
+        
         let ecs_manager = EcsManager::new();
         
         // Create terrain mesh
-        let terrain_mesh = Mesh::new_raw(&gl, &flat_vertices, &indices)?;
+        let terrain_mesh = Mesh::new_terrain(&gl, &flat_vertices, &indices)?;
         let mut renderer = &mut graphics_context.renderer;
         renderer.set_terrain_mesh(terrain_mesh);
         
@@ -166,6 +183,7 @@ impl Engine {
             vehicle_throttle: 0.0,
             vehicle_steering: 0.0,
             vehicle_brake: 0.0,
+            vehicle,
         })
     }
 
@@ -249,7 +267,14 @@ impl Engine {
                 }
             }
             (winit::keyboard::Key::Character(ref c), ElementState::Pressed) if c == "r" || c == "R" => {
-                // Reset truck position
+                // Reset truck position - Задача 1: Reset vehicle
+                if let Some(ref mut vehicle) = self.vehicle {
+                    vehicle.set_position(Vector3::new(0.0, 10.0, 0.0));
+                    vehicle.body_mut().velocity = nalgebra::Vector3::zeros();
+                    vehicle.body_mut().angular_velocity = nalgebra::Vector3::zeros();
+                    vehicle.body_mut().rotation = UnitQuaternion::identity();
+                }
+                // Also sync to physics world
                 if let Some(chassis_id) = self.vehicle_chassis_id {
                     if let Some(body) = self.physics_world.get_body_mut(chassis_id) {
                         body.position = Vector3::new(0.0, 10.0, 0.0);
@@ -265,19 +290,21 @@ impl Engine {
             }
             (winit::keyboard::Key::Character(ref c), ElementState::Pressed) if c == "c" || c == "C" => {
                 // Switch camera view (first person/third person)
-                if let Some(ref mut game) = self.game {
-                    match self.graphics_context.renderer.camera.camera_type {
-                        crate::graphics::camera::CameraType::FirstPerson => {
-                            self.graphics_context.renderer.camera.switch_to_third_person(
-                                game.get_truck_position(),
-                                game.get_truck_rotation()
-                            );
-                        }
-                        crate::graphics::camera::CameraType::ThirdPerson => {
-                            self.graphics_context.renderer.camera.switch_to_first_person(
-                                game.get_truck_position(),
-                                game.get_truck_rotation()
-                            );
+                if let Some(chassis_id) = self.vehicle_chassis_id {
+                    if let Some(body) = self.physics_world.get_body(chassis_id) {
+                        match self.graphics_context.renderer.camera.camera_type {
+                            crate::graphics::camera::CameraType::FirstPerson => {
+                                self.graphics_context.renderer.camera.switch_to_third_person(
+                                    body.position,
+                                    body.rotation
+                                );
+                            }
+                            crate::graphics::camera::CameraType::ThirdPerson => {
+                                self.graphics_context.renderer.camera.switch_to_first_person(
+                                    body.position,
+                                    body.rotation
+                                );
+                            }
                         }
                     }
                 }
@@ -318,6 +345,10 @@ impl Engine {
                     _ => {}
                 }
             }
+            (winit::keyboard::Key::Character(ref c), ElementState::Pressed) if c == "f" || c == "F" => {
+                // Задача 5: Toggle debug mode with F key (or use F1)
+                self.debug_mode = !self.debug_mode;
+            }
             _ => {}
         }
         true
@@ -341,6 +372,28 @@ impl Engine {
                 self.physics_accumulator += delta_time.min(0.1);  // clamp to avoid spiral of death
                 
                 while self.physics_accumulator >= PHYSICS_TIMESTEP {
+                    // Исп-2: Обновить Vehicle перед physics step
+                    if let Some(ref mut vehicle) = self.vehicle {
+                        vehicle.set_controls(physics::VehicleControls::new(
+                            self.vehicle_throttle,
+                            self.vehicle_brake,
+                            self.vehicle_steering,
+                            0.0,
+                        ));
+                        if let Some(ref gen) = self.terrain_generator {
+                            let h = |x: f32, z: f32| gen.get_height(x, z);
+                            vehicle.update(PHYSICS_TIMESTEP, h);
+                        }
+                        // Синхронизировать chassis body в PhysicsWorld
+                        if let Some(chassis_id) = self.vehicle_chassis_id {
+                            if let Some(body) = self.physics_world.get_body_mut(chassis_id) {
+                                body.position = vehicle.position();
+                                body.rotation = vehicle.body().rotation;
+                                body.velocity = vehicle.body().velocity;
+                            }
+                        }
+                    }
+                    
                     self.physics_world.step(PHYSICS_TIMESTEP);
                     self.physics_accumulator -= PHYSICS_TIMESTEP;
                 }
@@ -365,7 +418,7 @@ impl Engine {
                     self.winch.update(delta_time, &mut self.physics_world, &mut vec![]);
                 }
 
-                // Sync camera with vehicle chassis position
+                // Sync camera with vehicle chassis position and update HUD from Vehicle
                 if let Some(chassis_id) = self.vehicle_chassis_id {
                     if let Some(body) = self.physics_world.get_body(chassis_id) {
                         // Use interpolated position for smooth camera follow
@@ -378,12 +431,37 @@ impl Engine {
                         // Update renderer vehicle transform for rendering
                         self.graphics_context.renderer.set_vehicle_transform(pos, rot);
                         
-                        // Update HUD data
-                        let speed = body.velocity.magnitude() * 3.6;  // m/s -> km/h
-                        let hud_data = crate::ui::hud::VehicleHudData {
-                            speed_kmh: speed,
-                            engine_rpm: 800.0 + speed * 10.0,  // placeholder
-                            ..Default::default()
+                        // Update texture streaming based on truck position
+                        self.graphics_context.renderer.texture_streaming.update_camera_position(nalgebra::Vector2::new(
+                            pos.x,
+                            pos.z,
+                        ));
+                        
+                        // Задача 9: HUD показывает реальные данные от Vehicle
+                        let hud_data = if let Some(ref vehicle) = self.vehicle {
+                            let speed = vehicle.speed() * 3.6;  // m/s -> km/h
+                            let mut data = crate::ui::hud::VehicleHudData {
+                                speed_kmh: speed,
+                                engine_rpm: 800.0 + speed * 25.0,  // placeholder RPM
+                                engine_rpm_max: 3200.0,
+                                gear: crate::ui::hud::GearState::Drive(1),
+                                engine_running: true,
+                                fuel_level: 1.0,
+                                ..Default::default()
+                            };
+                            // Добавить данные колёс
+                            for (i, wheel) in vehicle.wheels().iter().enumerate().take(4) {
+                                data.wheel_contact[i] = wheel.is_in_contact;
+                                data.wheel_slip[i] = if wheel.is_in_contact { 0.1 } else { 0.0 };
+                            }
+                            data
+                        } else {
+                            let speed = body.velocity.magnitude() * 3.6;
+                            crate::ui::hud::VehicleHudData {
+                                speed_kmh: speed,
+                                engine_rpm: 800.0 + speed * 10.0,
+                                ..Default::default()
+                            }
                         };
                         self.hud_manager.update(hud_data.clone(), delta_time);
                         
@@ -394,21 +472,7 @@ impl Engine {
                 
                 profiler::stop_timer("physics_step");
 
-                // Update game if it exists
-                if let Some(ref mut game) = self.game {
-                    profiler::start_timer("game_update");
-                    game.update(delta_time);
-                    profiler::stop_timer("game_update");
-                    
-                    // Update texture streaming based on truck position
-                    if let Some(ref game) = self.game {
-                        let truck_position = game.get_truck_position();
-                        self.graphics_context.renderer.texture_streaming.update_camera_position(nalgebra::Vector2::new(
-                            truck_position.x,
-                            truck_position.z,
-                        ));
-                    }
-                }
+                // Update game if it exists (REMOVED - no longer used)
             }
             _ => {
                 // Update other systems as needed (still use delta_time)

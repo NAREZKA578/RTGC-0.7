@@ -63,6 +63,7 @@ impl Mesh {
     }
     
     /// Create a mesh from raw float data (positions, normals, texcoords interleaved)
+    /// stride = 32 bytes (8 floats: 3 pos + 3 normal + 2 texcoord)
     pub fn new_raw(gl: &Context, vertices: &[f32], indices: &[u32]) -> Result<Self, Box<dyn std::error::Error>> {
         let gl = Rc::new(gl.clone());
         
@@ -97,6 +98,61 @@ impl Mesh {
             // TexCoord attribute (location 2) - 2 floats, stride 32 bytes, offset 24
             gl.enable_vertex_attrib_array(2);
             gl.vertex_attrib_pointer_f32(2, 2, glow::FLOAT, false, 32, 24);
+            
+            Ok(Mesh {
+                gl,
+                vao,
+                vbo,
+                ebo,
+                indices_count: indices.len() as i32,
+            })
+        }
+    }
+    
+    /// Create a terrain mesh with extended vertex format (stride = 40 bytes)
+    /// Vertex layout: position(3) + normal(3) + moisture(1) + slope(1) + texcoord(2) = 10 floats = 40 bytes
+    pub fn new_terrain(gl: &Context, vertices: &[f32], indices: &[u32]) -> Result<Self, Box<dyn std::error::Error>> {
+        let gl = Rc::new(gl.clone());
+        
+        unsafe {
+            let vao = gl.create_vertex_array()?;
+            gl.bind_vertex_array(Some(vao));
+            
+            let vbo = gl.create_buffer()?;
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(vbo));
+            gl.buffer_data_u8_slice(
+                glow::ARRAY_BUFFER,
+                bytemuck::cast_slice(vertices),
+                glow::STATIC_DRAW,
+            );
+            
+            let ebo = gl.create_buffer()?;
+            gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(ebo));
+            gl.buffer_data_u8_slice(
+                glow::ELEMENT_ARRAY_BUFFER,
+                bytemuck::cast_slice(indices),
+                glow::STATIC_DRAW,
+            );
+            
+            // Position attribute (location 0) - 3 floats, stride 40 bytes
+            gl.enable_vertex_attrib_array(0);
+            gl.vertex_attrib_pointer_f32(0, 3, glow::FLOAT, false, 40, 0);
+            
+            // Normal attribute (location 1) - 3 floats, stride 40 bytes, offset 12
+            gl.enable_vertex_attrib_array(1);
+            gl.vertex_attrib_pointer_f32(1, 3, glow::FLOAT, false, 40, 12);
+            
+            // Moisture attribute (location 2) - 1 float, stride 40 bytes, offset 24
+            gl.enable_vertex_attrib_array(2);
+            gl.vertex_attrib_pointer_f32(2, 1, glow::FLOAT, false, 40, 24);
+            
+            // Slope attribute (location 3) - 1 float, stride 40 bytes, offset 28
+            gl.enable_vertex_attrib_array(3);
+            gl.vertex_attrib_pointer_f32(3, 1, glow::FLOAT, false, 40, 28);
+            
+            // TexCoord attribute (location 4) - 2 floats, stride 40 bytes, offset 32
+            gl.enable_vertex_attrib_array(4);
+            gl.vertex_attrib_pointer_f32(4, 2, glow::FLOAT, false, 40, 32);
             
             Ok(Mesh {
                 gl,

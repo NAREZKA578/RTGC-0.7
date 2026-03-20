@@ -54,7 +54,7 @@ serde_json = "1.0"
 toml = "0.8"
 
 # Audio decoding
-symphonia = { version = "0.5", features = ["ogg", "vorbis"] }
+symphonia = { version = "0.5", features = ["ogg", "vorbis", "wav", "pcm"] }
 
 # Error Handling
 thiserror = "2.0"

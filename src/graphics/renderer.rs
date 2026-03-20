@@ -43,6 +43,10 @@ pub struct Renderer {
     sun_direction: Vector3<f32>,
     ambient_intensity: f32,
     vehicle_lights_enabled: bool,
+    // Задача 2: Vehicle shader
+    vehicle_shader: Option<Shader>,
+    // Задача 3: Sky VAO
+    sky_vao: Option<glow::VertexArray>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -65,63 +69,19 @@ impl Renderer {
             gl.enable(glow::CULL_FACE);
             gl.cull_face(glow::BACK);
             
-            // Create default shader
-            let vertex_shader = r#"#version 330 core
-            layout (location = 0) in vec3 a_position;
-            layout (location = 1) in vec3 a_normal;
-            layout (location = 2) in vec2 a_tex_coords;
+            // Исп-4: Загружать шейдер из файла
+            let vertex_src = std::fs::read_to_string("assets/shaders/terrain.vert")
+                .unwrap_or_else(|_| include_str!("../../assets/shaders/terrain.vert").to_string());
+            let fragment_src = std::fs::read_to_string("assets/shaders/terrain.frag")
+                .unwrap_or_else(|_| include_str!("../../assets/shaders/terrain.frag").to_string());
+            let shader = Shader::new(&gl, &vertex_src, &fragment_src)?;
             
-            uniform mat4 u_model;
-            uniform mat4 u_view;
-            uniform mat4 u_projection;
-            
-            out vec3 frag_position;
-            out vec3 frag_normal;
-            out vec2 frag_tex_coords;
-            
-            void main() {
-                vec4 world_pos = u_model * vec4(a_position, 1.0);
-                gl_Position = u_projection * u_view * world_pos;
-                
-                frag_position = world_pos.xyz;
-                frag_normal = mat3(transpose(inverse(u_model))) * a_normal;
-                frag_tex_coords = a_tex_coords;
-            }"#;
-            
-            let fragment_shader = r#"#version 330 core
-            in vec3 frag_position;
-            in vec3 frag_normal;
-            in vec2 frag_tex_coords;
-            
-            out vec4 FragColor;
-            
-            uniform vec3 u_light_pos;
-            uniform vec3 u_view_pos;
-            uniform vec3 u_light_color;
-            
-            void main() {
-                // Ambient
-                float ambient_strength = 0.1;
-                vec3 ambient = ambient_strength * u_light_color;
-                
-                // Diffuse
-                vec3 norm = normalize(frag_normal);
-                vec3 light_dir = normalize(u_light_pos - frag_position);
-                float diff = max(dot(norm, light_dir), 0.0);
-                vec3 diffuse = diff * u_light_color;
-                
-                // Specular
-                float specular_strength = 0.5;
-                vec3 view_dir = normalize(u_view_pos - frag_position);
-                vec3 reflect_dir = reflect(-light_dir, norm);
-                float spec = pow(max(dot(view_dir, reflect_dir), 0.0), 32.0);
-                vec3 specular = specular_strength * spec * u_light_color;
-                
-                vec3 result = (ambient + diffuse + specular) * vec3(0.5, 0.5, 1.0);
-                FragColor = vec4(result, 1.0);
-            }"#;
-            
-            let shader = Shader::new(&gl, vertex_shader, fragment_shader)?;
+            // Задача 2: Загрузить vehicle shader
+            let vehicle_vertex_src = std::fs::read_to_string("assets/shaders/vehicle.vert")
+                .unwrap_or_else(|_| include_str!("../../assets/shaders/vehicle.vert").to_string());
+            let vehicle_fragment_src = std::fs::read_to_string("assets/shaders/vehicle.frag")
+                .unwrap_or_else(|_| include_str!("../../assets/shaders/vehicle.frag").to_string());
+            let vehicle_shader = Shader::new(&gl, &vehicle_vertex_src, &vehicle_fragment_src).ok();
         }
         
         let camera = Camera::new(
@@ -133,6 +93,33 @@ impl Renderer {
             0.1,
             100.0,
         );
+        
+        // Задача 3: Создать VAO для неба
+        let sky_vao = unsafe {
+            let vao = gl.create_vertex_array().ok();
+            if let Some(v) = vao {
+                gl.bind_vertex_array(Some(v));
+                // Вершины для 2 треугольников на весь экран [x, y, r, g, b]
+                let verts: [f32; 30] = [
+                   -1.0, -1.0,  0.7, 0.8, 0.9,  // bottom-left horizon
+                    1.0, -1.0,  0.7, 0.8, 0.9,  // bottom-right horizon
+                    1.0,  1.0,  0.4, 0.6, 0.9,  // top-right top
+                   -1.0, -1.0,  0.7, 0.8, 0.9,
+                    1.0,  1.0,  0.4, 0.6, 0.9,
+                   -1.0,  1.0,  0.4, 0.6, 0.9,  // top-left top
+                ];
+                let vbo = gl.create_buffer().ok();
+                if let Some(b) = vbo {
+                    gl.bind_buffer(glow::ARRAY_BUFFER, Some(b));
+                    gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, bytemuck::cast_slice(&verts), glow::STATIC_DRAW);
+                    gl.enable_vertex_attrib_array(0);
+                    gl.vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, 20, 0);
+                    gl.enable_vertex_attrib_array(1);
+                    gl.vertex_attrib_pointer_f32(1, 3, glow::FLOAT, false, 20, 8);
+                }
+            }
+            vao
+        };
         
         Ok(Self {
             gl,
@@ -154,6 +141,12 @@ impl Renderer {
             sun_direction: Vector3::y(),
             ambient_intensity: 0.5,
             vehicle_lights_enabled: false,
+            // Задача 2: Vehicle shader
+            vehicle_shader,
+            // Задача 3: Sky VAO
+            sky_vao,
+            width: 800,
+            height: 600,
         })
     }
     
@@ -256,6 +249,11 @@ impl Renderer {
             self.gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
         }
 
+        // Задача 3: Рендерить небо перед сценой
+        if self.menu_state == MenuState::InGame {
+            self.render_sky()?;
+        }
+
         // Update LOD system based on camera position
         self.lod_manager.update_all_lods(&self.camera.position);
 
@@ -281,21 +279,59 @@ impl Renderer {
         self.camera.update_for_truck(truck_position, truck_rotation);
     }
     
-    fn render_loading_screen(&self) -> Result<(), Box<dyn std::error::Error>> {
-        // Render loading screen
-        println!("Loading...");
+    fn render_loading_screen(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        unsafe {
+            self.gl.disable(glow::DEPTH_TEST);
+            self.gl.clear_color(0.05, 0.05, 0.1, 1.0);
+            self.gl.clear(glow::COLOR_BUFFER_BIT);
+            // Центральная надпись (пока просто прямоугольник)
+            let w = self.width as f32;
+            let h = self.height as f32;
+            self.draw_rect(w/2.0 - 100.0, h/2.0 - 30.0, 200.0, 60.0, [0.2, 0.4, 0.6, 0.9]);
+            self.gl.enable(glow::DEPTH_TEST);
+        }
         Ok(())
     }
     
-    fn render_main_menu(&self) -> Result<(), Box<dyn std::error::Error>> {
-        // Render main menu with text
-        println!("Main Menu");
+    fn render_main_menu(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        // Задача 7: Меню рисуется, а не println!
+        unsafe {
+            self.gl.disable(glow::DEPTH_TEST);
+            self.gl.clear_color(0.05, 0.05, 0.1, 1.0);
+            self.gl.clear(glow::COLOR_BUFFER_BIT);
+
+            let w = self.width as f32;
+            let h = self.height as f32;
+
+            // Центральная панель
+            self.draw_rect(w/2.0 - 150.0, h/2.0 - 120.0, 300.0, 240.0, [0.1, 0.1, 0.15, 0.9]);
+
+            // Пункты меню как цветные полосы
+            // "Новая игра" — зелёная
+            self.draw_rect(w/2.0 - 120.0, h/2.0 - 80.0, 240.0, 40.0, [0.2, 0.6, 0.2, 0.8]);
+            // "Продолжить" — синяя
+            self.draw_rect(w/2.0 - 120.0, h/2.0 - 30.0, 240.0, 40.0, [0.2, 0.3, 0.6, 0.8]);
+            // "Настройки" — серая
+            self.draw_rect(w/2.0 - 120.0, h/2.0 + 20.0, 240.0, 40.0, [0.3, 0.3, 0.3, 0.8]);
+            // "Выход" — красная
+            self.draw_rect(w/2.0 - 120.0, h/2.0 + 70.0, 240.0, 40.0, [0.6, 0.2, 0.2, 0.8]);
+
+            self.gl.enable(glow::DEPTH_TEST);
+        }
         Ok(())
     }
     
-    fn render_city_selection(&self) -> Result<(), Box<dyn std::error::Error>> {
-        // Render city selection screen
-        println!("City Selection");
+    fn render_city_selection(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        unsafe {
+            self.gl.disable(glow::DEPTH_TEST);
+            self.gl.clear_color(0.05, 0.05, 0.1, 1.0);
+            self.gl.clear(glow::COLOR_BUFFER_BIT);
+            let w = self.width as f32;
+            let h = self.height as f32;
+            // Панель выбора города
+            self.draw_rect(w/2.0 - 200.0, h/2.0 - 150.0, 400.0, 300.0, [0.1, 0.1, 0.15, 0.9]);
+            self.gl.enable(glow::DEPTH_TEST);
+        }
         Ok(())
     }
     
@@ -334,6 +370,25 @@ impl Renderer {
                 self.gl.uniform_3_f32(Some(&u_light_color), 
                     light_intensity, light_intensity, light_intensity * 1.1);
             }
+            // Исп-7: Ambient intensity uniform
+            if let Some(u) = self.gl.get_uniform_location(self.shader.program, "u_ambient_intensity") {
+                self.gl.uniform_1_f32(Some(&u), self.ambient_intensity);
+            }
+            // Задача 10: Fog uniforms
+            if let Some(u) = self.gl.get_uniform_location(self.shader.program, "u_fog_start") {
+                self.gl.uniform_1_f32(Some(&u), 200.0);
+            }
+            if let Some(u) = self.gl.get_uniform_location(self.shader.program, "u_fog_end") {
+                self.gl.uniform_1_f32(Some(&u), 500.0);
+            }
+            if let Some(u) = self.gl.get_uniform_location(self.shader.program, "u_fog_color") {
+                self.gl.uniform_3_f32(Some(&u), self.sky_color_horizon.x,
+                                      self.sky_color_horizon.y, self.sky_color_horizon.z);
+            }
+            // Исп-7: Solid color disabled for terrain rendering
+            if let Some(u) = self.gl.get_uniform_location(self.shader.program, "u_use_solid_color") {
+                self.gl.uniform_1_i32(Some(&u), 0);
+            }
         }
         
         // === SPRINT 1: Render terrain mesh ===
@@ -351,11 +406,28 @@ impl Renderer {
         // === SPRINT 1: Render vehicle as box ===
         if let Some((pos, rot)) = self.vehicle_transform {
             let model_matrix = rot.to_homogeneous().prepend_translation(&pos);
-            unsafe {
-                if let Some(u_model) = self.gl.get_uniform_location(self.shader.program, "u_model") {
-                    self.gl.uniform_matrix_4_f32_slice(Some(&u_model), false, model_matrix.as_slice());
+            
+            // Задача 2: Использовать vehicle_shader если доступен
+            if let Some(ref vs) = self.vehicle_shader {
+                vs.bind();
+                unsafe {
+                    if let Some(u_model) = self.gl.get_uniform_location(vs.program, "u_model") {
+                        self.gl.uniform_matrix_4_f32_slice(Some(&u_model), false, model_matrix.as_slice());
+                    }
+                    if let Some(u_color) = self.gl.get_uniform_location(vs.program, "u_color") {
+                        // Ржавый металл цвет
+                        self.gl.uniform_4_f32(Some(&u_color), 0.8, 0.3, 0.1, 1.0);
+                    }
+                }
+            } else {
+                self.shader.bind();
+                unsafe {
+                    if let Some(u_model) = self.gl.get_uniform_location(self.shader.program, "u_model") {
+                        self.gl.uniform_matrix_4_f32_slice(Some(&u_model), false, model_matrix.as_slice());
+                    }
                 }
             }
+            
             if let Some(ref box_mesh) = self.vehicle_box_mesh {
                 box_mesh.draw();
             }
@@ -393,6 +465,26 @@ impl Renderer {
         // HUD рисуется после основной сцены, без depth test
         self.render_hud()?;
         
+        // Задача 5: Отрисовать debug линии если включен debug режим
+        // (engine должен передать флаг debug_mode в renderer)
+        
+        Ok(())
+    }
+    
+    /// Задача 3: Рендерить небо (gradient quad)
+    fn render_sky(&self) -> Result<(), Box<dyn std::error::Error>> {
+        unsafe {
+            self.gl.disable(glow::DEPTH_TEST);
+            
+            if let Some(vao) = self.sky_vao {
+                self.gl.bind_vertex_array(Some(vao));
+                // Простой шейдер для градиента - используем текущий или создаём отдельный
+                // Для простоты передадим цвета через атрибуты вершин
+                self.gl.draw_arrays(glow::TRIANGLES, 0, 6);
+            }
+            
+            self.gl.enable(glow::DEPTH_TEST);
+        }
         Ok(())
     }
     
@@ -538,15 +630,31 @@ impl Renderer {
         self.height
     }
     
-    fn render_world_creation(&self) -> Result<(), Box<dyn std::error::Error>> {
-        // Render world creation screen
-        println!("World Creation");
+    fn render_world_creation(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        unsafe {
+            self.gl.disable(glow::DEPTH_TEST);
+            self.gl.clear_color(0.05, 0.05, 0.1, 1.0);
+            self.gl.clear(glow::COLOR_BUFFER_BIT);
+            let w = self.width as f32;
+            let h = self.height as f32;
+            // Панель создания мира
+            self.draw_rect(w/2.0 - 200.0, h/2.0 - 150.0, 400.0, 300.0, [0.1, 0.1, 0.15, 0.9]);
+            self.gl.enable(glow::DEPTH_TEST);
+        }
         Ok(())
     }
     
-    fn render_settings(&self) -> Result<(), Box<dyn std::error::Error>> {
-        // Render settings screen
-        println!("Settings");
+    fn render_settings(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        unsafe {
+            self.gl.disable(glow::DEPTH_TEST);
+            self.gl.clear_color(0.05, 0.05, 0.1, 1.0);
+            self.gl.clear(glow::COLOR_BUFFER_BIT);
+            let w = self.width as f32;
+            let h = self.height as f32;
+            // Панель настроек
+            self.draw_rect(w/2.0 - 200.0, h/2.0 - 150.0, 400.0, 300.0, [0.1, 0.1, 0.15, 0.9]);
+            self.gl.enable(glow::DEPTH_TEST);
+        }
         Ok(())
     }
     
