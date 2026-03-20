@@ -1,0 +1,20 @@
+{
+  "graphics": {
+    "texture_quality": "High",
+    "shadow_quality": "Medium",
+    "anti_aliasing": true,
+    "vsync": true,
+    "fullscreen": false
+  },
+  "audio": {
+    "master_volume": 0.8,
+    "music_volume": 0.6,
+    "sfx_volume": 0.9,
+    "engine_volume": 0.7
+  },
+  "gameplay": {
+    "camera_sensitivity": 1.0,
+    "invert_y": false,
+    "auto_save_interval_minutes": 5
+  }
+}

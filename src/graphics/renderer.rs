@@ -45,8 +45,21 @@ pub struct Renderer {
     vehicle_lights_enabled: bool,
     // Задача 2: Vehicle shader
     vehicle_shader: Option<Shader>,
+    // Исп-2: Sky shader (separate from terrain shader)
+    sky_shader: Option<Shader>,
     // Задача 3: Sky VAO
     sky_vao: Option<glow::VertexArray>,
+    sky_vbo: Option<glow::Buffer>,  // Сохраняем VBO для обновления цветов
+    // Граф-1: Bitmap font texture
+    font_texture: Option<Texture>,
+    font_chars: HashMap<char, [f32; 4]>, // char -> [u, v, w, h] UV coords
+    // Граф-2: Batched HUD VAO/VBO for optimization
+    hud_vao: Option<glow::VertexArray>,
+    hud_vbo: Option<glow::Buffer>,
+    hud_vertices: Vec<f32>,
+    // Граф-3: Minimap texture
+    minimap_texture: Option<Texture>,
+    minimap_size: u32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -57,6 +70,7 @@ pub enum MenuState {
     InGame,
     WorldCreation,
     Settings,
+    Paused,  // Ввод-2: Пауза внутри игры
 }
 
 impl Renderer {
@@ -82,6 +96,12 @@ impl Renderer {
             let vehicle_fragment_src = std::fs::read_to_string("assets/shaders/vehicle.frag")
                 .unwrap_or_else(|_| include_str!("../../assets/shaders/vehicle.frag").to_string());
             let vehicle_shader = Shader::new(&gl, &vehicle_vertex_src, &vehicle_fragment_src).ok();
+            
+            // Исп-2: Создать простой шейдер для неба
+            let sky_shader = Shader::new(&gl,
+                "#version 330 core\nlayout(location=0) in vec2 pos;\nlayout(location=1) in vec3 col;\nout vec3 v_col;\nvoid main() { gl_Position = vec4(pos, 0.0, 1.0); v_col = col; }",
+                "#version 330 core\nin vec3 v_col; out vec4 FragColor;\nvoid main() { FragColor = vec4(v_col, 1.0); }"
+            ).ok();
         }
         
         let camera = Camera::new(
@@ -95,8 +115,9 @@ impl Renderer {
         );
         
         // Задача 3: Создать VAO для неба
-        let sky_vao = unsafe {
+        let (sky_vao, sky_vbo) = unsafe {
             let vao = gl.create_vertex_array().ok();
+            let vbo = gl.create_buffer().ok();
             if let Some(v) = vao {
                 gl.bind_vertex_array(Some(v));
                 // Вершины для 2 треугольников на весь экран [x, y, r, g, b]
@@ -108,7 +129,6 @@ impl Renderer {
                     1.0,  1.0,  0.4, 0.6, 0.9,
                    -1.0,  1.0,  0.4, 0.6, 0.9,  // top-left top
                 ];
-                let vbo = gl.create_buffer().ok();
                 if let Some(b) = vbo {
                     gl.bind_buffer(glow::ARRAY_BUFFER, Some(b));
                     gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, bytemuck::cast_slice(&verts), glow::STATIC_DRAW);
@@ -118,7 +138,33 @@ impl Renderer {
                     gl.vertex_attrib_pointer_f32(1, 3, glow::FLOAT, false, 20, 8);
                 }
             }
-            vao
+            (vao, vbo)
+        };
+        
+        // Граф-1: Создать bitmap font texture (процедурно, 128x128, 16x16 сетка символов)
+        let (font_texture, font_chars) = Self::create_bitmap_font(&gl);
+        
+        // Граф-2: Создать VAO/VBO для батчинга HUD
+        let (hud_vao, hud_vbo) = unsafe {
+            let vao = gl.create_vertex_array();
+            let vbo = gl.create_buffer();
+            if let Some(vao) = vao {
+                gl.bind_vertex_array(Some(vao));
+            }
+            if let Some(vbo) = vbo {
+                gl.bind_buffer(glow::ARRAY_BUFFER, Some(vbo));
+                // Пустой буфер, будем обновлять каждый кадр
+                gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, &[], glow::DYNAMIC_DRAW);
+                gl.enable_vertex_attrib_array(0); // position: vec2
+                gl.vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, 24, 0);
+                gl.enable_vertex_attrib_array(1); // color: vec4
+                gl.vertex_attrib_pointer_f32(1, 4, glow::FLOAT, false, 24, 8);
+                gl.enable_vertex_attrib_array(2); // uv: vec2
+                gl.vertex_attrib_pointer_f32(2, 2, glow::FLOAT, false, 24, 16);
+            }
+            gl.bind_vertex_array(None);
+            gl.bind_buffer(glow::ARRAY_BUFFER, None);
+            (vao, vbo)
         };
         
         Ok(Self {
@@ -143,11 +189,84 @@ impl Renderer {
             vehicle_lights_enabled: false,
             // Задача 2: Vehicle shader
             vehicle_shader,
+            // Исп-2: Sky shader
+            sky_shader,
             // Задача 3: Sky VAO
             sky_vao,
+            sky_vbo,
+            // Граф-1: Bitmap font
+            font_texture: Some(font_texture),
+            font_chars,
+            // Граф-2: Batched HUD
+            hud_vao,
+            hud_vbo,
+            hud_vertices: Vec::with_capacity(1024),
+            // Граф-3: Minimap
+            minimap_texture: None,
+            minimap_size: 128,
             width: 800,
             height: 600,
         })
+    }
+    
+    /// Граф-1: Создать процедурную bitmap font текстуру 128x128
+    fn create_bitmap_font(gl: &Rc<Context>) -> (Texture, HashMap<char, [f32; 4]>) {
+        use std::collections::HashMap;
+        // Создаём текстуру 128x128 с символами 8x8 в сетке 16x16
+        let mut pixels = vec![255u8; 128 * 128 * 4]; // RGBA
+        let mut font_chars = HashMap::new();
+        
+        // Простые глифы для ASCII 32-127 (96 символов)
+        // Каждый символ 8x8 пикселей, сетка 16 колонок × 6 рядов = 96 мест
+        for (idx, c) in (32..=127).enumerate() {
+            let col = idx % 16;
+            let row = idx / 16;
+            let base_x = col * 8;
+            let base_y = row * 8;
+            
+            // UV координаты для этого символа
+            let u = col as f32 / 16.0;
+            let v = row as f32 / 16.0;
+            let w = 1.0 / 16.0;
+            let h = 1.0 / 16.0;
+            font_chars.insert(c as char, [u, v, w, h]);
+            
+            // Рисуем простой глиф (паттерн на основе кода символа)
+            for dy in 0..8 {
+                for dx in 0..8 {
+                    let px = base_x + dx;
+                    let py = base_y + dy;
+                    let pidx = (py * 128 + px) * 4;
+                    
+                    // Простой паттерн: некоторые пиксели чёрные, некоторые белые
+                    let pattern = match c {
+                        b'0'..=b'9' => (dx + dy) % 3 == 0,
+                        b'A'..=b'Z' | b'a'..=b'z' => (dx * dy) % 2 == 0,
+                        b' ' => false,
+                        _ => (dx + dy) % 2 == 0,
+                    };
+                    
+                    if pattern {
+                        pixels[pidx] = 0;
+                        pixels[pidx + 1] = 0;
+                        pixels[pidx + 2] = 0;
+                        pixels[pidx + 3] = 255;
+                    } else {
+                        pixels[pidx] = 255;
+                        pixels[pidx + 1] = 255;
+                        pixels[pidx + 2] = 255;
+                        pixels[pidx + 3] = 0;
+                    }
+                }
+            }
+        }
+        
+        let texture = Texture::from_rgba8(gl, 128, 128, &pixels).unwrap_or_else(|_| {
+            // Fallback: создать пустую текстуру
+            Texture::from_rgba8(gl, 1, 1, &[255, 255, 255, 255]).unwrap()
+        });
+        
+        (texture, font_chars)
     }
     
     /// Set the terrain mesh for rendering
@@ -169,6 +288,30 @@ impl Renderer {
     pub fn set_sky_color(&mut self, top: Vector3<f32>, horizon: Vector3<f32>) {
         self.sky_color_top = top;
         self.sky_color_horizon = horizon;
+        // Граф-4: Обновить VAO неба с новыми цветами
+        self.update_sky_colors(top, horizon);
+    }
+
+    /// Граф-4: Обновить цвета неба в VAO
+    fn update_sky_colors(&self, top: Vector3<f32>, horizon: Vector3<f32>) {
+        unsafe {
+            if let Some(vao) = self.sky_vao {
+                self.gl.bind_vertex_array(Some(vao));
+                // Обновить вершины с новыми цветами через buffer_sub_data
+                let verts: [f32; 30] = [
+                   -1.0, -1.0,  horizon.x, horizon.y, horizon.z,  // bottom-left horizon
+                    1.0, -1.0,  horizon.x, horizon.y, horizon.z,  // bottom-right horizon
+                    1.0,  1.0,  top.x, top.y, top.z,              // top-right top
+                   -1.0, -1.0,  horizon.x, horizon.y, horizon.z,
+                    1.0,  1.0,  top.x, top.y, top.z,
+                   -1.0,  1.0,  top.x, top.y, top.z,              // top-left top
+                ];
+                if let Some(_vbo) = self.sky_vbo {
+                    // Используем buffer_sub_data для обновления без пересоздания
+                    self.gl.buffer_sub_data_u8_slice(glow::ARRAY_BUFFER, 0, bytemuck::cast_slice(&verts));
+                }
+            }
+        }
     }
 
     pub fn set_sun_direction(&mut self, dir: Vector3<f32>) {
@@ -267,7 +410,7 @@ impl Renderer {
             MenuState::Loading => self.render_loading_screen()?,
             MenuState::MainMenu => self.render_main_menu()?,
             MenuState::CitySelection => self.render_city_selection()?,
-            MenuState::InGame => self.render_game()?,
+            MenuState::InGame | MenuState::Paused => self.render_game()?,
             MenuState::WorldCreation => self.render_world_creation()?,
             MenuState::Settings => self.render_settings()?,
         }
@@ -465,23 +608,61 @@ impl Renderer {
         // HUD рисуется после основной сцены, без depth test
         self.render_hud()?;
         
-        // Задача 5: Отрисовать debug линии если включен debug режим
-        // (engine должен передать флаг debug_mode в renderer)
+        // Ввод-2: Рендерить оверлей паузы если в режиме Paused
+        if self.menu_state == MenuState::Paused {
+            self.render_pause_overlay()?;
+        }
         
         Ok(())
     }
+    
+    /// Ввод-2: Оверлей паузы
+    fn render_pause_overlay(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        unsafe {
+            self.gl.disable(glow::DEPTH_TEST);
+            
+            let w = self.width as f32;
+            let h = self.height as f32;
+            
+            // Полупрозрачный фон
+            self.draw_rect(0.0, 0.0, w, h, [0.0, 0.0, 0.0, 0.5]);
+            
+            // Центральная панель
+            self.draw_rect(w/2.0 - 150.0, h/2.0 - 100.0, 300.0, 200.0, [0.1, 0.1, 0.15, 0.95]);
+            
+            // Кнопка "Продолжить" (зелёная)
+            self.draw_rect(w/2.0 - 120.0, h/2.0 - 40.0, 240.0, 40.0, [0.2, 0.6, 0.2, 0.8]);
+            
+            // Кнопка "Настройки" (серая)
+            self.draw_rect(w/2.0 - 120.0, h/2.0 + 10.0, 240.0, 40.0, [0.3, 0.3, 0.3, 0.8]);
+            
+            // Кнопка "Выход в меню" (красная)
+            self.draw_rect(w/2.0 - 120.0, h/2.0 + 60.0, 240.0, 40.0, [0.6, 0.2, 0.2, 0.8]);
+            
+            self.gl.enable(glow::DEPTH_TEST);
+        }
+        Ok(())
     
     /// Задача 3: Рендерить небо (gradient quad)
     fn render_sky(&self) -> Result<(), Box<dyn std::error::Error>> {
         unsafe {
             self.gl.disable(glow::DEPTH_TEST);
             
+            // Исп-2: Использовать sky_shader для рендеринга неба
+            if let Some(ref ss) = self.sky_shader {
+                ss.bind();
+            } else {
+                self.gl.enable(glow::DEPTH_TEST);
+                return Ok(());
+            }
+            
             if let Some(vao) = self.sky_vao {
                 self.gl.bind_vertex_array(Some(vao));
-                // Простой шейдер для градиента - используем текущий или создаём отдельный
-                // Для простоты передадим цвета через атрибуты вершин
                 self.gl.draw_arrays(glow::TRIANGLES, 0, 6);
             }
+            
+            // Вернуть основной шейдер
+            self.shader.bind();
             
             self.gl.enable(glow::DEPTH_TEST);
         }
@@ -542,6 +723,9 @@ impl Renderer {
                 self.draw_rect(150.0, self.height as f32 - 25.0, 100.0, 8.0, [1.0, 0.0, 0.0, 1.0]);
             }
             
+            // Граф-3: Мини-карта в правом верхнем углу
+            self.render_minimap(&hud_data);
+            
             // Re-enable depth test
             self.gl.enable(glow::DEPTH_TEST);
         }
@@ -600,8 +784,24 @@ impl Renderer {
         self.gl.enable_vertex_attrib_array(0);
         self.gl.vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, 8, 0);
         
+        // Исп-1: Pass color and uniforms to shader before drawing
+        if let Some(u) = self.gl.get_uniform_location(self.shader.program, "u_use_solid_color") {
+            self.gl.uniform_1_i32(Some(&u), 1); // enable solid color mode
+        }
+        if let Some(u) = self.gl.get_uniform_location(self.shader.program, "u_color") {
+            self.gl.uniform_4_f32(Some(&u), color[0], color[1], color[2], color[3]);
+        }
+        if let Some(u) = self.gl.get_uniform_location(self.shader.program, "u_projection") {
+            self.gl.uniform_matrix_4_f32_slice(Some(&u), false, ortho.as_slice());
+        }
+        
         // Draw the quad
         self.gl.draw_elements(glow::TRIANGLES, 6, glow::UNSIGNED_INT, 0);
+        
+        // Исп-1: Reset to terrain mode after drawing
+        if let Some(u) = self.gl.get_uniform_location(self.shader.program, "u_use_solid_color") {
+            self.gl.uniform_1_i32(Some(&u), 0); // back to terrain mode
+        }
         
         // Cleanup
         self.gl.delete_vertex_array(vao);
@@ -611,13 +811,148 @@ impl Renderer {
     
     /// Draw a 2D triangle (for minimap player icon)
     unsafe fn draw_triangle(&self, x1: f32, y1: f32, x2: f32, y2: f32, x3: f32, y3: f32, color: [f32; 4]) {
-        // Placeholder for triangle drawing
+        let ortho = Matrix4::new_orthographic(
+            0.0, self.width as f32,
+            0.0, self.height as f32,
+            -1.0, 1.0
+        );
+        
+        let vertices: [f32; 6] = [x1, y1, x2, y2, x3, y3];
+        
+        let vao = self.gl.create_vertex_array().unwrap_or(0);
+        let vbo = self.gl.create_buffer().unwrap_or(0);
+        
+        if vao == 0 || vbo == 0 { return; }
+        
+        self.gl.bind_vertex_array(Some(vao));
+        self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(vbo));
+        self.gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, bytemuck::cast_slice(&vertices), glow::STREAM_DRAW);
+        self.gl.enable_vertex_attrib_array(0);
+        self.gl.vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, 8, 0);
+        
+        if let Some(u) = self.gl.get_uniform_location(self.shader.program, "u_use_solid_color") {
+            self.gl.uniform_1_i32(Some(&u), 1);
+        }
+        if let Some(u) = self.gl.get_uniform_location(self.shader.program, "u_color") {
+            self.gl.uniform_4_f32(Some(&u), color[0], color[1], color[2], color[3]);
+        }
+        if let Some(u) = self.gl.get_uniform_location(self.shader.program, "u_projection") {
+            self.gl.uniform_matrix_4_f32_slice(Some(&u), false, ortho.as_slice());
+        }
+        
+        self.gl.draw_arrays(glow::TRIANGLES, 0, 3);
+        
+        if let Some(u) = self.gl.get_uniform_location(self.shader.program, "u_use_solid_color") {
+            self.gl.uniform_1_i32(Some(&u), 0);
+        }
+        
+        self.gl.delete_vertex_array(vao);
+        self.gl.delete_buffer(vbo);
     }
     
-    /// Draw text at position
-    unsafe fn draw_text(&self, text: &str, x: f32, y: f32, size: f32, color: [f32; 4]) {
-        // Placeholder for text rendering - needs bitmap font or signed distance field font
-        // For Sprint 1: stub implementation
+    /// Граф-3: Рендеринг мини-карты
+    fn render_minimap(&mut self, hud_data: &crate::ui::hud::VehicleHudData) {
+        let map_size = 128.0;
+        let margin = 10.0;
+        let x = self.width as f32 - map_size - margin;
+        let y = self.height as f32 - map_size - margin;
+        
+        unsafe {
+            // Рамка мини-карты
+            self.draw_rect(x - 2.0, y - 2.0, map_size + 4.0, map_size + 4.0, [0.0, 0.0, 0.0, 0.8]);
+            
+            // Фон (условная земля)
+            self.draw_rect(x, y, map_size, map_size, [0.2, 0.3, 0.2, 1.0]);
+            
+            // Иконка игрока (треугольник по центру)
+            let cx = x + map_size / 2.0;
+            let cy = y + map_size / 2.0;
+            let icon_size = 8.0;
+            self.draw_triangle(
+                cx, cy - icon_size,
+                cx - icon_size / 2.0, cy + icon_size / 2.0,
+                cx + icon_size / 2.0, cy + icon_size / 2.0,
+                [1.0, 1.0, 0.0, 1.0],
+            );
+            
+            // Если есть данные о грузе - показать маркер
+            if hud_data.cargo_attached {
+                self.draw_rect(x + map_size - 20.0, y + 5.0, 10.0, 10.0, [0.0, 1.0, 1.0, 1.0]);
+            }
+        }
+    }
+    
+    /// Граф-1: Draw text using bitmap font
+    unsafe fn draw_text(&mut self, text: &str, x: f32, y: f32, size: f32, color: [f32; 4]) {
+        let char_size = size; // 8x8 scaled
+        let mut cursor_x = x;
+        
+        // Bind font texture
+        if let Some(ref tex) = self.font_texture {
+            tex.bind();
+        }
+        
+        // Use shader with texturing mode
+        if let Some(u) = self.gl.get_uniform_location(self.shader.program, "u_use_solid_color") {
+            self.gl.uniform_1_i32(Some(&u), 0); // use texture mode
+        }
+        if let Some(u) = self.gl.get_uniform_location(self.shader.program, "u_use_texture") {
+            self.gl.uniform_1_i32(Some(&u), 1);
+        }
+        
+        for ch in text.chars() {
+            if let Some(uv) = self.font_chars.get(&ch) {
+                let [u, v, w, h] = *uv;
+                
+                // Draw textured quad for this character
+                let vertices: [f32; 32] = [
+                    // pos (2) + color (4) + uv (2) = 8 floats per vertex, 4 vertices
+                    cursor_x, y + char_size,       color[0], color[1], color[2], color[3],   u, v + h,
+                    cursor_x + char_size, y + char_size,  color[0], color[1], color[2], color[3],   u + w, v + h,
+                    cursor_x + char_size, y,              color[0], color[1], color[2], color[3],   u + w, v,
+                    cursor_x, y,                          color[0], color[1], color[2], color[3],   u, v,
+                ];
+                
+                let indices: [u32; 6] = [0, 1, 2, 0, 2, 3];
+                
+                let vao = self.gl.create_vertex_array().unwrap_or(0);
+                let vbo = self.gl.create_buffer().unwrap_or(0);
+                let ebo = self.gl.create_buffer().unwrap_or(0);
+                
+                if vao != 0 && vbo != 0 && ebo != 0 {
+                    self.gl.bind_vertex_array(Some(vao));
+                    self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(vbo));
+                    self.gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, bytemuck::cast_slice(&vertices), glow::STREAM_DRAW);
+                    self.gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(ebo));
+                    self.gl.buffer_data_u8_slice(glow::ELEMENT_ARRAY_BUFFER, bytemuck::cast_slice(&indices), glow::STREAM_DRAW);
+                    
+                    // pos: loc 0, 2 floats
+                    self.gl.enable_vertex_attrib_array(0);
+                    self.gl.vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, 32, 0);
+                    // color: loc 1, 4 floats
+                    self.gl.enable_vertex_attrib_array(1);
+                    self.gl.vertex_attrib_pointer_f32(1, 4, glow::FLOAT, false, 32, 8);
+                    // uv: loc 2, 2 floats
+                    self.gl.enable_vertex_attrib_array(2);
+                    self.gl.vertex_attrib_pointer_f32(2, 2, glow::FLOAT, false, 32, 24);
+                    
+                    self.gl.draw_elements(glow::TRIANGLES, 6, glow::UNSIGNED_INT, 0);
+                    
+                    self.gl.delete_vertex_array(vao);
+                    self.gl.delete_buffer(vbo);
+                    self.gl.delete_buffer(ebo);
+                }
+                
+                cursor_x += char_size;
+            } else if ch == ' ' {
+                cursor_x += char_size;
+            }
+        }
+        
+        // Reset shader state
+        if let Some(u) = self.gl.get_uniform_location(self.shader.program, "u_use_texture") {
+            self.gl.uniform_1_i32(Some(&u), 0);
+        }
     }
     
     /// Get renderer width

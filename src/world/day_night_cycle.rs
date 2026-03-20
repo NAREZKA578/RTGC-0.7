@@ -374,6 +374,21 @@ impl DayNightCycle {
         self.sun.intensity + self.moon.intensity
     }
 
+    /// Граф-4: Get sky color top for renderer
+    pub fn get_sky_color_top(&self) -> Vector3<f32> {
+        self.sky_color_top
+    }
+
+    /// Граф-4: Get sky color horizon (bottom) for renderer
+    pub fn get_sky_color_horizon(&self) -> Vector3<f32> {
+        self.sky_color_bottom
+    }
+
+    /// Граф-4: Get ambient intensity for renderer
+    pub fn get_ambient_intensity(&self) -> f32 {
+        self.get_total_light_intensity()
+    }
+
     /// Calculate view matrix looking at celestial body
     pub fn get_celestial_view_matrix(&self, body: CelestialBody, distance: f32) -> Matrix4<f32> {
         let position = match body {

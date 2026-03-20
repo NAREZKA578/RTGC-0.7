@@ -1,11 +1,4 @@
 ```
-# Rust/Cargo specific
-target/
-Cargo.lock
-
-# Dependencies
-node_modules/
-
 # Compiled and build artifacts
 *.o
 *.obj
@@ -14,47 +7,54 @@ node_modules/
 *.so
 *.a
 *.out
-build/
-dist/
 
-# Dependencies cache
-**/__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-env/
-venv/
-.venv/
-.conda
-.mypy_cache/
-.pytest_cache/
-.tox/
+# Dependencies
+target/
+**/target/
 
 # Logs and temp files
 *.log
 *.tmp
 *.swp
-*.swo
-*~
-.DS_Store
-Thumbs.db
 
-# Environment variables
+# Editors
+.vscode/
+.idea/
+
+# Environment
 .env
 .env.local
-.env.*
+*.env.*
 
-# Coverage reports
+# Coverage
 coverage/
 htmlcov/
 .coverage
 
-# IDE specific
-.vscode/
-.idea/
-*.swp
-*.swo
+# MyPy
+.mypy_cache/
+
+# Pytest
+.pytest_cache/
+
+# Distribution
+dist/
+build/
+
+# Virtual environments
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Gradle
+.gradle/
+**/.gradle/
+
+# Node
+node_modules/
 
 # Compressed files
 *.zip

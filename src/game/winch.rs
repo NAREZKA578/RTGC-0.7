@@ -116,4 +116,14 @@ impl Winch {
             "LOOSE"
         }
     }
+
+    /// Игра-6: Get winch active status for HUD
+    pub fn is_active(&self) -> bool {
+        self.is_active
+    }
+
+    /// Игра-6: Get current winch cable length for HUD
+    pub fn current_length(&self) -> f32 {
+        self.current_length
+    }
 }
