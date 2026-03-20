@@ -5,10 +5,83 @@
 //! - Fractal Brownian Motion (fbm) for detailed terrain
 //! - Hydraulic and thermal erosion simulation
 //! - Multi-biome support
+//! - Surface type detection for vehicle physics
 
 use nalgebra::Vector3;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
+
+/// Surface types affecting vehicle physics
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SurfaceType {
+    /// Good asphalt: friction 0.85, low rolling resistance
+    AsphaltGood,
+    /// Bad asphalt (potholes): friction 0.75, vibration
+    AsphaltBad,
+    /// Gravel road: friction 0.70, higher resistance
+    Gravel,
+    /// Dry dirt: friction 0.65
+    DirtDry,
+    /// Wet dirt: friction 0.35, slippery
+    DirtWet,
+    /// Mud: friction 0.25, very slippery, high resistance
+    Mud,
+    /// Sand: friction 0.55, very high resistance
+    Sand,
+    /// Snow: friction 0.30
+    Snow,
+    /// Ice: friction 0.10, extremely slippery
+    Ice,
+    /// Grass: friction 0.60
+    Grass,
+    /// Bare rock: friction 0.80
+    RockBare,
+    /// Water: buoyancy, friction 0.15
+    Water,
+}
+
+impl SurfaceType {
+    /// Get friction coefficient for this surface
+    pub fn friction(&self) -> f32 {
+        match self {
+            SurfaceType::AsphaltGood => 0.85,
+            SurfaceType::AsphaltBad => 0.75,
+            SurfaceType::Gravel => 0.70,
+            SurfaceType::DirtDry => 0.65,
+            SurfaceType::DirtWet => 0.35,
+            SurfaceType::Mud => 0.25,
+            SurfaceType::Sand => 0.55,
+            SurfaceType::Snow => 0.30,
+            SurfaceType::Ice => 0.10,
+            SurfaceType::Grass => 0.60,
+            SurfaceType::RockBare => 0.80,
+            SurfaceType::Water => 0.15,
+        }
+    }
+
+    /// Get rolling resistance coefficient
+    pub fn rolling_resistance(&self) -> f32 {
+        match self {
+            SurfaceType::AsphaltGood => 0.01,
+            SurfaceType::AsphaltBad => 0.015,
+            SurfaceType::Gravel => 0.025,
+            SurfaceType::DirtDry => 0.03,
+            SurfaceType::DirtWet => 0.04,
+            SurfaceType::Mud => 0.08,
+            SurfaceType::Sand => 0.10,
+            SurfaceType::Snow => 0.05,
+            SurfaceType::Ice => 0.005,
+            SurfaceType::Grass => 0.035,
+            SurfaceType::RockBare => 0.02,
+            SurfaceType::Water => 0.15,
+        }
+    }
+
+    /// Check if surface causes vibration (roughness)
+    pub fn is_rough(&self) -> bool {
+        matches!(self, SurfaceType::AsphaltBad | SurfaceType::Gravel | SurfaceType::RockBare)
+    }
+}
 
 /// Configuration for noise generation
 #[derive(Debug, Clone)]
@@ -151,6 +224,8 @@ pub struct TerrainGenerator {
     config: NoiseConfig,
     /// Biome thresholds (height, moisture)
     biomes: Vec<Biome>,
+    /// Road network for surface type override
+    road_network: Option<crate::world::RoadNetwork>,
 }
 
 #[derive(Debug, Clone)]
@@ -257,7 +332,18 @@ impl TerrainGenerator {
             noise,
             config,
             biomes,
+            road_network: None,
         }
+    }
+    
+    /// Set the road network for surface type detection
+    pub fn set_road_network(&mut self, road_network: crate::world::RoadNetwork) {
+        self.road_network = Some(road_network);
+    }
+    
+    /// Get reference to road network
+    pub fn road_network(&self) -> Option<&crate::world::RoadNetwork> {
+        self.road_network.as_ref()
     }
     
     /// Get height at world coordinates
@@ -572,6 +658,40 @@ impl TerrainGenerator {
         }
         
         info!("Applied {} iterations of thermal erosion", iterations);
+    }
+
+    /// Get surface type at world coordinates (x, z)
+    /// Used for vehicle physics friction calculation
+    pub fn get_surface_type(&self, x: f32, z: f32, height: f32) -> SurfaceType {
+        let biome = self.get_biome(height / self.config.height_scale, 0.5);
+        
+        // Base surface from biome
+        let base_surface = match biome.name.as_str() {
+            "Deep Ocean" | "Ocean" => SurfaceType::Water,
+            "Beach" => SurfaceType::Sand,
+            "Desert" => SurfaceType::Sand,
+            "Snow" | "Tundra" => SurfaceType::Snow,
+            "Mountain" | "Rocky" => SurfaceType::RockBare,
+            "Forest" | "Taiga" => SurfaceType::Grass,
+            "Plains" | "Grassland" => SurfaceType::Grass,
+            _ => SurfaceType::Grass,
+        };
+
+        // Override based on height and slope
+        if height < -10.0 {
+            return SurfaceType::Water;
+        } else if height > 80.0 {
+            return SurfaceType::Snow;
+        }
+
+        // Check if point is on a road - roads override biome surface
+        if let Some(road_network) = &self.road_network {
+            if let Some(road) = road_network.get_road_at(x, z) {
+                return road.surface_type();
+            }
+        }
+
+        base_surface
     }
 }
 

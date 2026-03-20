@@ -2,6 +2,7 @@
 //! Provides rendering, camera, shaders, meshes, textures, and RHI abstraction
 
 pub mod renderer;
+pub mod renderer_rhi;  // RHI-based renderer (future backend-agnostic)
 pub mod camera;
 pub mod shader;
 pub mod mesh;
@@ -15,6 +16,7 @@ pub mod particles;
 pub mod debug_renderer;
 
 pub use renderer::{Renderer, MenuState};
+pub use renderer_rhi::RendererRhi;  // New RHI-based renderer
 pub use camera::Camera;
 pub use shader::Shader;
 pub use mesh::Mesh;

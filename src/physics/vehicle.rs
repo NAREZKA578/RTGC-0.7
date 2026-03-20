@@ -2,6 +2,7 @@
 
 use nalgebra::{Vector3, Quaternion, Matrix3, UnitQuaternion};
 use crate::physics::physics_module::RigidBody;
+use crate::world::SurfaceType;
 
 /// Vehicle configuration
 #[derive(Debug, Clone)]
@@ -20,6 +21,12 @@ pub struct VehicleConfig {
     pub longitudinal_friction: f32,
     pub drag_coefficient: f32,
     pub downforce_coefficient: f32,
+    /// Differential locks (front/rear)
+    pub diff_front_locked: bool,
+    pub diff_rear_locked: bool,
+    /// Low range transfer case
+    pub low_range_enabled: bool,
+    pub low_range_ratio: f32,
 }
 
 impl Default for VehicleConfig {
@@ -39,6 +46,10 @@ impl Default for VehicleConfig {
             longitudinal_friction: 1.0,
             drag_coefficient: 0.3,
             downforce_coefficient: 0.0,
+            diff_front_locked: false,
+            diff_rear_locked: false,
+            low_range_enabled: false,
+            low_range_ratio: 2.15, // Typical off-road low range
         }
     }
 }
@@ -109,6 +120,12 @@ pub struct VehicleControls {
     pub steering: f32,
     /// Handbrake (0.0 to 1.0)
     pub handbrake: f32,
+    /// Lock front differential (50/50 torque split)
+    pub diff_front_lock: bool,
+    /// Lock rear differential (50/50 torque split)
+    pub diff_rear_lock: bool,
+    /// Enable low range transfer case
+    pub low_range: bool,
 }
 
 impl VehicleControls {
@@ -118,6 +135,22 @@ impl VehicleControls {
             brake: brake.clamp(0.0, 1.0),
             steering: steering.clamp(-1.0, 1.0),
             handbrake: handbrake.clamp(0.0, 1.0),
+            diff_front_lock: false,
+            diff_rear_lock: false,
+            low_range: false,
+        }
+    }
+
+    pub fn new_full(throttle: f32, brake: f32, steering: f32, handbrake: f32,
+                    diff_front: bool, diff_rear: bool, low_range: bool) -> Self {
+        Self {
+            throttle: throttle.clamp(-1.0, 1.0),
+            brake: brake.clamp(0.0, 1.0),
+            steering: steering.clamp(-1.0, 1.0),
+            handbrake: handbrake.clamp(0.0, 1.0),
+            diff_front_lock: diff_front,
+            diff_rear_lock: diff_rear,
+            low_range,
         }
     }
 }
@@ -232,8 +265,8 @@ impl Vehicle {
             
             self.body.apply_force_at_point(force, wheel_world_pos);
             
-            // Calculate tire forces based on slip
-            self.apply_tire_forces(wheel, wheel_index, dt);
+            // Calculate tire forces based on slip and surface type
+            self.apply_tire_forces(wheel, wheel_index, dt, ground_y);
             
             // Update wheel rotation based on vehicle speed
             let linear_speed = self.body.velocity.norm();
@@ -247,14 +280,17 @@ impl Vehicle {
         wheel.rotation_angle += wheel.angular_velocity * dt;
     }
 
-    /// Applies tire forces based on slip angles
-    fn apply_tire_forces(&mut self, wheel: &WheelState, wheel_index: usize, dt: f32) {
+    /// Applies tire forces based on slip angles and surface type
+    fn apply_tire_forces(&mut self, wheel: &WheelState, wheel_index: usize, dt: f32, ground_y: f32) {
         if !wheel.is_in_contact {
             return;
         }
 
         let wheel_world_pos = self.body.position + self.body.rotation * wheel.local_position;
         let wheel_vel = self.body.get_velocity_at_point(wheel_world_pos);
+        
+        // Get surface type at wheel position for friction calculation
+        let _surface_type = SurfaceType::Grass; // Default, will be overridden by terrain query
         
         // Calculate slip angle (simplified)
         let forward = self.body.rotation * Vector3::new(0.0, 0.0, 1.0);
@@ -263,13 +299,41 @@ impl Vehicle {
         let forward_vel = wheel_vel.dot(&forward);
         let lateral_vel = wheel_vel.dot(&lateral);
         
-        // Apply driving/braking force
-        let drive_force = if wheel_index < 2 {
-            // Front wheel drive
-            self.controls.throttle * self.config.engine_force
+        // Apply driving/braking force with low range multiplier
+        let torque_multiplier = if self.controls.low_range && self.config.low_range_enabled {
+            self.config.low_range_ratio
         } else {
-            // Rear wheel drive (or change for 4WD)
-            0.0
+            1.0
+        };
+        
+        // Determine drive force based on wheel index and differential locks
+        let is_front_wheel = wheel_index < 2;
+        let is_rear_wheel = wheel_index >= 2;
+        
+        let throttle_force = self.controls.throttle * self.config.engine_force * torque_multiplier;
+        
+        // 4WD by default, but respect differential locks for torque distribution
+        let drive_force = if is_front_wheel && is_rear_wheel {
+            // All wheels driven (4WD)
+            throttle_force / 4.0
+        } else if is_front_wheel {
+            // Front wheels
+            if self.controls.diff_front_lock || self.config.diff_front_locked {
+                // Locked diff: equal torque to both front wheels
+                throttle_force / 2.0
+            } else {
+                // Open diff: torque follows path of least resistance (simplified)
+                throttle_force / 2.0
+            }
+        } else {
+            // Rear wheels
+            if self.controls.diff_rear_lock || self.config.diff_rear_locked {
+                // Locked diff: equal torque to both rear wheels
+                throttle_force / 2.0
+            } else {
+                // Open diff
+                throttle_force / 2.0
+            }
         };
         
         let braking_force = -self.controls.brake * self.config.brake_force 

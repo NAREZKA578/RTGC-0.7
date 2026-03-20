@@ -251,9 +251,14 @@ impl OpenWorld {
         &self.loaded_chunks
     }
     
-    /// Get the terrain generator
+    /// Get the terrain generator (immutable)
     pub fn get_generator(&self) -> &TerrainGenerator {
         &self.generator
+    }
+    
+    /// Get the terrain generator (mutable)
+    pub fn generator_mut(&mut self) -> &mut TerrainGenerator {
+        &mut self.generator
     }
     
     /// Get the LOD system

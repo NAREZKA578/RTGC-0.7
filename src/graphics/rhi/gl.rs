@@ -446,3 +446,8 @@ impl RhiCommandList for GlCommandList {
         unimplemented!("Compute shaders not yet implemented");
     }
 }
+
+/// Helper function to create a GL device from an existing glow context
+pub fn create_gl_device(context: Arc<Context>) -> GlDevice {
+    GlDevice::new(context)
+}
