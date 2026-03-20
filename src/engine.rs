@@ -28,7 +28,6 @@ pub struct Engine {
     pub audio_system: AudioSystem,
     pub ecs_manager: EcsManager,
     pub physics_world: physics::PhysicsWorld,
-    pub game: Option<Game>,
     gl_context: GlContext,
     last_frame_time: std::time::Instant,
     // C1: Fixed timestep accumulator
@@ -51,6 +50,10 @@ pub struct Engine {
     // Sprint 4: Cargo & Winch
     cargo: Option<Cargo>,
     winch: Winch,
+    // Vehicle control state
+    vehicle_throttle: f32,
+    vehicle_steering: f32,
+    vehicle_brake: f32,
 }
 
 impl Engine {
@@ -141,7 +144,6 @@ impl Engine {
             audio_system,
             ecs_manager,
             physics_world,
-            game: None,
             gl_context,
             last_frame_time: std::time::Instant::now(),
             physics_accumulator: 0.0,
@@ -160,6 +162,10 @@ impl Engine {
             // Sprint 4: Cargo & Winch
             cargo: None,
             winch: Winch::new(chassis_id),
+            // Vehicle control state - initialized to zero
+            vehicle_throttle: 0.0,
+            vehicle_steering: 0.0,
+            vehicle_brake: 0.0,
         })
     }
 
@@ -204,65 +210,58 @@ impl Engine {
             }
             (winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowUp), ElementState::Pressed) |
             (winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowUp), ElementState::Released) => {
-                if let Some(ref mut game) = self.game {
-                    if key_event.state == ElementState::Pressed {
-                        game.set_throttle(1.0);
-                    } else {
-                        game.set_throttle(0.0);
-                    }
+                if key_event.state == ElementState::Pressed {
+                    self.vehicle_throttle = 1.0;
+                } else {
+                    self.vehicle_throttle = 0.0;
                 }
             }
             (winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowDown), ElementState::Pressed) |
             (winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowDown), ElementState::Released) => {
-                if let Some(ref mut game) = self.game {
-                    if key_event.state == ElementState::Pressed {
-                        game.set_throttle(-1.0);
-                    } else {
-                        game.set_throttle(0.0);
-                    }
+                if key_event.state == ElementState::Pressed {
+                    self.vehicle_throttle = -1.0;
+                } else {
+                    self.vehicle_throttle = 0.0;
                 }
             }
             (winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowLeft), ElementState::Pressed) |
             (winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowLeft), ElementState::Released) => {
-                if let Some(ref mut game) = self.game {
-                    if key_event.state == ElementState::Pressed {
-                        game.set_steering(-1.0);
-                    } else {
-                        game.set_steering(0.0);
-                    }
+                if key_event.state == ElementState::Pressed {
+                    self.vehicle_steering = -1.0;
+                } else {
+                    self.vehicle_steering = 0.0;
                 }
             }
             (winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowRight), ElementState::Pressed) |
             (winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowRight), ElementState::Released) => {
-                if let Some(ref mut game) = self.game {
-                    if key_event.state == ElementState::Pressed {
-                        game.set_steering(1.0);
-                    } else {
-                        game.set_steering(0.0);
-                    }
+                if key_event.state == ElementState::Pressed {
+                    self.vehicle_steering = 1.0;
+                } else {
+                    self.vehicle_steering = 0.0;
                 }
             }
             (winit::keyboard::Key::Named(winit::keyboard::NamedKey::Space), ElementState::Pressed) |
             (winit::keyboard::Key::Named(winit::keyboard::NamedKey::Space), ElementState::Released) => {
-                if let Some(ref mut game) = self.game {
-                    if key_event.state == ElementState::Pressed {
-                        game.set_brake(1.0);
-                    } else {
-                        game.set_brake(0.0);
-                    }
+                if key_event.state == ElementState::Pressed {
+                    self.vehicle_brake = 1.0;
+                } else {
+                    self.vehicle_brake = 0.0;
                 }
             }
             (winit::keyboard::Key::Character(ref c), ElementState::Pressed) if c == "r" || c == "R" => {
                 // Reset truck position
-                if let Some(ref mut game) = self.game {
-                    game.reset_truck();
+                if let Some(chassis_id) = self.vehicle_chassis_id {
+                    if let Some(body) = self.physics_world.get_body_mut(chassis_id) {
+                        body.position = Vector3::new(0.0, 10.0, 0.0);
+                        body.velocity = nalgebra::Vector3::zeros();
+                        body.angular_velocity = nalgebra::Vector3::zeros();
+                        body.rotation = UnitQuaternion::identity();
+                    }
                 }
             }
             (winit::keyboard::Key::Character(ref c), ElementState::Pressed) if c == "e" || c == "E" => {
                 // Activate cargo action (pickup/drop)
-                if let Some(ref mut game) = self.game {
-                    game.activate_cargo_action();
-                }
+                self.winch.activate_action();
             }
             (winit::keyboard::Key::Character(ref c), ElementState::Pressed) if c == "c" || c == "C" => {
                 // Switch camera view (first person/third person)
