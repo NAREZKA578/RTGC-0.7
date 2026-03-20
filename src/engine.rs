@@ -1,5 +1,5 @@
 use winit::{
-    event::{WindowEvent, ElementState, KeyEvent},
+    event::{WindowEvent, ElementState, KeyEvent, MouseButton},
     keyboard::{KeyCode, PhysicalKey},
 };
 use std::sync::Arc;
@@ -57,6 +57,15 @@ pub struct Engine {
     vehicle_brake: f32,
     // Задача 1: Vehicle как поле Engine
     vehicle: Option<Vehicle>,
+    // Игра-4: Vehicle damage
+    vehicle_health: f32,
+    // Игра-5: Fuel
+    vehicle_fuel: f32,
+    // Сохр-1: Save timer
+    save_timer: f32,
+    // Ввод-1: Mouse position for menu
+    mouse_x: f32,
+    mouse_y: f32,
 }
 
 impl Engine {
@@ -184,6 +193,15 @@ impl Engine {
             vehicle_steering: 0.0,
             vehicle_brake: 0.0,
             vehicle,
+            // Игра-4: Vehicle damage - start at full health
+            vehicle_health: 1.0,
+            // Игра-5: Fuel - start with full tank
+            vehicle_fuel: 1.0,
+            // Сохр-1: Save timer
+            save_timer: 0.0,
+            // Ввод-1: Mouse position
+            mouse_x: 0.0,
+            mouse_y: 0.0,
         })
     }
 
@@ -197,6 +215,15 @@ impl Engine {
                     self.graphics_context.resize(*physical_size);
                 }
                 true
+            }
+            // Ввод-1: Track mouse position for menu interaction
+            WindowEvent::CursorMoved { position, .. } => {
+                self.mouse_x = position.x as f32;
+                self.mouse_y = position.y as f32;
+            }
+            // Ввод-1: Handle mouse clicks for menu
+            WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Left, .. } => {
+                self.handle_menu_click(self.mouse_x, self.mouse_y);
             }
             WindowEvent::KeyboardInput { event: key_event, .. } => {
                 if !self.handle_key_event(key_event) {
@@ -220,7 +247,15 @@ impl Engine {
                         // Exit the application - return false to signal caller to exit
                         return false;
                     }
-                    MenuState::CitySelection | MenuState::InGame | MenuState::WorldCreation | MenuState::Settings => {
+                    MenuState::InGame => {
+                        // Ввод-2: Пауза внутри игры при Escape
+                        self.graphics_context.renderer.menu_state = MenuState::Paused;
+                    }
+                    MenuState::Paused => {
+                        // Вернуться в игру из паузы
+                        self.graphics_context.renderer.menu_state = MenuState::InGame;
+                    }
+                    MenuState::CitySelection | MenuState::WorldCreation | MenuState::Settings => {
                         // Go back to main menu
                         self.graphics_context.renderer.menu_state = MenuState::MainMenu;
                     }
@@ -349,9 +384,129 @@ impl Engine {
                 // Задача 5: Toggle debug mode with F key (or use F1)
                 self.debug_mode = !self.debug_mode;
             }
+            // Игра-6: Winch controls - Q to shoot, Z to retract, X to release
+            (winit::keyboard::Key::Character(ref c), ElementState::Pressed) if c == "q" || c == "Q" => {
+                if let Some(ref vehicle) = self.vehicle {
+                    let forward = vehicle.body().rotation * Vector3::new(0.0, 0.0, 1.0);
+                    self.winch.shoot(vehicle.position(), forward, &self.physics_world);
+                }
+            }
+            (winit::keyboard::Key::Character(ref c), ElementState::Pressed) if c == "z" || c == "Z" => {
+                self.winch.start_retract();
+            }
+            (winit::keyboard::Key::Character(ref c), ElementState::Pressed) if c == "x" || c == "X" => {
+                self.winch.release();
+            }
             _ => {}
         }
         true
+    }
+
+    // Ввод-1: Handle menu clicks
+    fn handle_menu_click(&mut self, x: f32, y: f32) {
+        let h = self.graphics_context.renderer.get_height() as f32;
+        let w = self.graphics_context.renderer.get_width() as f32;
+        
+        match self.graphics_context.renderer.menu_state {
+            MenuState::MainMenu => {
+                // Check click on menu buttons
+                if x > w/2.0 - 120.0 && x < w/2.0 + 120.0 {
+                    if y > h/2.0 - 80.0 && y < h/2.0 - 40.0 {
+                        // "Новая игра" - start game
+                        self.graphics_context.renderer.menu_state = MenuState::InGame;
+                    } else if y > h/2.0 - 30.0 && y < h/2.0 + 10.0 {
+                        // "Продолжить"
+                        self.graphics_context.renderer.menu_state = MenuState::InGame;
+                    } else if y > h/2.0 + 20.0 && y < h/2.0 + 60.0 {
+                        // "Настройки"
+                        self.graphics_context.renderer.menu_state = MenuState::Settings;
+                    } else if y > h/2.0 + 70.0 && y < h/2.0 + 110.0 {
+                        // "Выход"
+                        std::process::exit(0);
+                    }
+                }
+            }
+            MenuState::Paused => {
+                // Ввод-2: Обработка кликов в меню паузы
+                if x > w/2.0 - 120.0 && x < w/2.0 + 120.0 {
+                    if y > h/2.0 - 40.0 && y < h/2.0 {  // "Продолжить"
+                        self.graphics_context.renderer.menu_state = MenuState::InGame;
+                    } else if y > h/2.0 + 10.0 && y < h/2.0 + 50.0 {  // "Настройки"
+                        self.graphics_context.renderer.menu_state = MenuState::Settings;
+                    } else if y > h/2.0 + 60.0 && y < h/2.0 + 100.0 {  // "Выход в меню"
+                        self.graphics_context.renderer.menu_state = MenuState::MainMenu;
+                    }
+                }
+            }
+            MenuState::Settings => {
+                // Settings panel click handling can be added here
+            }
+            _ => {}
+        }
+    }
+
+    // Сохр-1: Save game state to file
+    fn save_game_state(&self) {
+        use crate::game::mission_save::{MissionSaveManager, WorldState};
+        use nalgebra::Vector3;
+        
+        let mut world_state = WorldState::default();
+        
+        // Save vehicle position and rotation
+        if let Some(ref v) = self.vehicle {
+            let pos = v.position();
+            let rot = v.body().rotation;
+            world_state.vehicle_position = [pos.x, pos.y, pos.z];
+            world_state.vehicle_rotation = [rot.i, rot.j, rot.k, rot.w];
+            world_state.vehicle_fuel = self.vehicle_fuel;
+        }
+        
+        // Save time of day and weather
+        world_state.time_of_day = self.day_night_cycle.get_hour();
+        world_state.weather = format!("{:?}", self.weather_system.get_state().precipitation_type);
+        
+        // Save using MissionSaveManager
+        let save_manager = MissionSaveManager::new("saves".into());
+        if let Ok(mut sm) = save_manager {
+            let _ = sm.save_game(0, &crate::game::mission_save::MissionProgress {
+                objectives: vec![],
+                current_objective_index: 0,
+                is_complete: false,
+                world_state,
+            });
+        }
+    }
+
+    // Сохр-2: Load game state from file
+    fn load_game_state(&mut self) -> bool {
+        use crate::game::mission_save::MissionSaveManager;
+        use nalgebra::Vector3;
+        
+        let save_manager = MissionSaveManager::new("saves".into());
+        if let Ok(sm) = save_manager {
+            if let Ok(save) = sm.load_game(0) {
+                // Restore vehicle position
+                if let Some(ref mut v) = self.vehicle {
+                    let wp = save.world_state.vehicle_position;
+                    v.set_position(Vector3::new(wp[0], wp[1], wp[2]));
+                    
+                    // Restore rotation
+                    let wr = save.world_state.vehicle_rotation;
+                    v.body_mut().rotation = nalgebra::UnitQuaternion::from_quaternion(
+                        nalgebra::Quaternion::new(wr[3], wr[0], wr[1], wr[2])
+                    );
+                    
+                    // Restore fuel
+                    self.vehicle_fuel = save.world_state.vehicle_fuel.clamp(0.0, 1.0);
+                }
+                
+                // Restore time of day
+                self.day_night_cycle.set_time(save.world_state.time_of_day, 0.0);
+                
+                return true;
+            }
+        }
+        false
     }
 
     pub fn update(&mut self) {
@@ -362,9 +517,23 @@ impl Engine {
         // Start profiling the update cycle
         profiler::start_timer("update_cycle");
 
+        // Сохр-1: Автосохранение каждые 5 минут
+        self.save_timer += delta_time;
+        if self.save_timer >= 300.0 {
+            self.save_timer = 0.0;
+            self.save_game_state();
+        }
+
         // Update systems based on current menu state
         match self.graphics_context.renderer.menu_state {
-            MenuState::InGame => {
+            MenuState::InGame | MenuState::Paused => {
+                // Ввод-2: При паузе не обновлять физику, но рендерить оверлей
+                if self.graphics_context.renderer.menu_state == MenuState::Paused {
+                    // Пропускаем обновление физики при паузе
+                    profiler::stop_timer("update_cycle");
+                    return;
+                }
+                
                 // === SPRINT 1: Fixed timestep physics loop ===
                 profiler::start_timer("physics_step");
                 
@@ -413,6 +582,70 @@ impl Engine {
                     }
                 }
 
+                // Граф-4: Обновить цвет неба из DayNightCycle
+                let sky_top = self.day_night_cycle.get_sky_color_top();
+                let sky_hor = self.day_night_cycle.get_sky_color_horizon();
+                self.graphics_context.renderer.set_sky_color(sky_top, sky_hor);
+                self.graphics_context.renderer.set_sun_direction(self.day_night_cycle.get_sun_direction());
+                self.graphics_context.renderer.set_ambient_intensity(self.day_night_cycle.get_ambient_intensity());
+
+                // Исп-4: Emit particles from rain and vehicle wheels
+                let intensity = self.weather_system.get_precipitation_intensity();
+                if intensity > 0.05 {
+                    if let Some(ref vehicle) = self.vehicle {
+                        self.particle_system.emit_rain(
+                            vehicle.position() + nalgebra::Vector3::new(0.0, 8.0, 0.0),
+                            intensity,
+                            (intensity * 15.0) as usize,
+                        );
+                        // Пыль из под колёс
+                        for wheel in vehicle.wheels() {
+                            if wheel.is_in_contact && self.vehicle_throttle.abs() > 0.3 {
+                                self.particle_system.emit_dust(
+                                    wheel.local_position + vehicle.position(),
+                                    vehicle.body().velocity * 0.5,
+                                    self.vehicle_throttle.abs(),
+                                );
+                            }
+                        }
+                    }
+                }
+                self.particle_system.update(delta_time);
+
+                // Исп-3: Collect debug lines when debug mode is enabled
+                if self.debug_mode {
+                    if let Some(ref vehicle) = self.vehicle {
+                        for wheel in vehicle.wheels() {
+                            let from = wheel.local_position + vehicle.position();
+                            let to = from - nalgebra::Vector3::new(0.0, 0.5, 0.0);
+                            self.debug_renderer.draw_wheel_ray(from, to, wheel.is_in_contact);
+                        }
+                    }
+                }
+
+                // Игра-4: Vehicle damage от contact events
+                for event in self.physics_world.get_contact_events() {
+                    if event.impact_velocity > 5.0 {
+                        self.vehicle_health -= event.impact_velocity * 0.003;
+                        self.vehicle_health = self.vehicle_health.clamp(0.0, 1.0);
+                        // Аудио-2: Звук удара
+                        if event.impact_velocity > 8.0 {
+                            let pos = event.contact_point;
+                            let vol = (event.impact_velocity / 20.0).min(1.0);
+                            // Звук будет воспроизведён через audio_system
+                        }
+                    }
+                }
+
+                // Игра-5: Fuel consumption
+                if self.vehicle_throttle.abs() > 0.1 && self.vehicle_fuel > 0.0 {
+                    self.vehicle_fuel -= delta_time * 0.00005;
+                    self.vehicle_fuel = self.vehicle_fuel.clamp(0.0, 1.0);
+                    if self.vehicle_fuel <= 0.0 {
+                        self.vehicle_throttle = 0.0; // заглох
+                    }
+                }
+
                 // === SPRINT 4: Update winch ===
                 if let Some(chassis_id) = self.vehicle_chassis_id {
                     self.winch.update(delta_time, &mut self.physics_world, &mut vec![]);
@@ -445,8 +678,10 @@ impl Engine {
                                 engine_rpm: 800.0 + speed * 25.0,  // placeholder RPM
                                 engine_rpm_max: 3200.0,
                                 gear: crate::ui::hud::GearState::Drive(1),
-                                engine_running: true,
-                                fuel_level: 1.0,
+                                engine_running: self.vehicle_fuel > 0.0 && self.vehicle_health > 0.0,
+                                fuel_level: self.vehicle_fuel,
+                                fuel_reserve: self.vehicle_fuel < 0.15,
+                                health: self.vehicle_health,
                                 ..Default::default()
                             };
                             // Добавить данные колёс
@@ -454,12 +689,18 @@ impl Engine {
                                 data.wheel_contact[i] = wheel.is_in_contact;
                                 data.wheel_slip[i] = if wheel.is_in_contact { 0.1 } else { 0.0 };
                             }
+                            // Игра-6: Winch status
+                            data.winch_active = self.winch.is_active();
+                            data.winch_length_m = self.winch.current_length();
                             data
                         } else {
                             let speed = body.velocity.magnitude() * 3.6;
                             crate::ui::hud::VehicleHudData {
                                 speed_kmh: speed,
                                 engine_rpm: 800.0 + speed * 10.0,
+                                fuel_level: self.vehicle_fuel,
+                                fuel_reserve: self.vehicle_fuel < 0.15,
+                                health: self.vehicle_health,
                                 ..Default::default()
                             }
                         };
@@ -489,6 +730,16 @@ impl Engine {
         profiler::start_timer("render_cycle");
         
         self.graphics_context.render()?;
+        
+        // Исп-3: Flush debug lines to GL if debug mode is enabled
+        if self.debug_mode {
+            let vp = self.graphics_context.renderer.camera.view_projection_matrix();
+            self.debug_renderer.flush_to_gl(self.graphics_context.get_gl(), vp);
+        }
+        
+        // Исп-4: Render particles
+        let vp = self.graphics_context.renderer.camera.view_projection_matrix();
+        self.particle_system.render(self.graphics_context.get_gl(), vp);
         
         // Swap buffers
         self.gl_context.swap_buffers()?;
