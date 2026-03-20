@@ -199,8 +199,8 @@ impl Vehicle {
         &self.controls
     }
 
-    /// Updates the vehicle physics
-    pub fn update(&mut self, dt: f32, ground_height: impl Fn(f32, f32) -> f32) {
+    /// Updates the vehicle physics with surface type information
+    pub fn update(&mut self, dt: f32, ground_height: impl Fn(f32, f32) -> f32, surface_getter: impl Fn(f32, f32) -> SurfaceType) {
         // Apply steering to front wheels
         let target_steering = self.controls.steering * self.config.max_steering_angle;
         
@@ -212,7 +212,7 @@ impl Vehicle {
 
         // Update suspension and wheel forces
         for (i, wheel) in self.wheels.iter_mut().enumerate() {
-            self.update_wheel(i, wheel, dt, &ground_height);
+            self.update_wheel(i, wheel, dt, &ground_height, &surface_getter);
         }
 
         // Apply aerodynamic drag
@@ -229,6 +229,7 @@ impl Vehicle {
         wheel: &mut WheelState,
         dt: f32,
         ground_height: &impl Fn(f32, f32) -> f32,
+        surface_getter: &impl Fn(f32, f32) -> SurfaceType,
     ) {
         // Get wheel world position
         let wheel_world_pos = self.body.position + self.body.rotation * wheel.local_position;
@@ -240,6 +241,9 @@ impl Vehicle {
         
         // Sample ground height at wheel position
         let ground_y = ground_height(wheel_world_pos.x, wheel_world_pos.z);
+        
+        // Get surface type at wheel position
+        let surface_type = surface_getter(wheel_world_pos.x, wheel_world_pos.z);
         
         // Calculate suspension compression
         let wheel_bottom_y = wheel_world_pos.y - self.config.wheel_radius;
@@ -266,7 +270,7 @@ impl Vehicle {
             self.body.apply_force_at_point(force, wheel_world_pos);
             
             // Calculate tire forces based on slip and surface type
-            self.apply_tire_forces(wheel, wheel_index, dt, ground_y);
+            self.apply_tire_forces(wheel, wheel_index, dt, ground_y, surface_type);
             
             // Update wheel rotation based on vehicle speed
             let linear_speed = self.body.velocity.norm();
@@ -281,7 +285,7 @@ impl Vehicle {
     }
 
     /// Applies tire forces based on slip angles and surface type
-    fn apply_tire_forces(&mut self, wheel: &WheelState, wheel_index: usize, dt: f32, ground_y: f32) {
+    fn apply_tire_forces(&mut self, wheel: &WheelState, wheel_index: usize, dt: f32, ground_y: f32, surface_type: SurfaceType) {
         if !wheel.is_in_contact {
             return;
         }
@@ -289,8 +293,9 @@ impl Vehicle {
         let wheel_world_pos = self.body.position + self.body.rotation * wheel.local_position;
         let wheel_vel = self.body.get_velocity_at_point(wheel_world_pos);
         
-        // Get surface type at wheel position for friction calculation
-        let _surface_type = SurfaceType::Grass; // Default, will be overridden by terrain query
+        // Get friction coefficients from surface type
+        let surface_friction = surface_type.friction_coefficient();
+        let rolling_resistance = surface_type.rolling_resistance();
         
         // Calculate slip angle (simplified)
         let forward = self.body.rotation * Vector3::new(0.0, 0.0, 1.0);

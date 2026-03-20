@@ -1,36 +1,4 @@
 ```
-# Rust/Cargo
-target/
-**/*.rs.bk
-**/*.lock.bk
-
-# Dependencies
-Cargo.lock
-
-# Logs and temp files
-*.log
-*.tmp
-
-# Environment
-.env
-.env.local
-.env.*
-
-# Editors
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Coverage
-coverage/
-htmlcov/
-.coverage
-
 # Compiled and build artifacts
 *.o
 *.obj
@@ -39,4 +7,32 @@ htmlcov/
 *.so
 *.a
 *.out
+
+# Dependencies
+target/
+**/target/
+
+# Logs and temp files
+*.log
+*.tmp
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# Coverage
+coverage/
+htmlcov/
+.coverage
+
+# OS
+.DS_Store
+Thumbs.db
 ```

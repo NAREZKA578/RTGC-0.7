@@ -41,6 +41,11 @@ pub enum SurfaceType {
 }
 
 impl SurfaceType {
+    /// Get friction coefficient for this surface (alias for friction())
+    pub fn friction_coefficient(&self) -> f32 {
+        self.friction()
+    }
+    
     /// Get friction coefficient for this surface
     pub fn friction(&self) -> f32 {
         match self {

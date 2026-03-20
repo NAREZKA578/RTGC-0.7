@@ -20,6 +20,7 @@ use crate::world::{OpenWorld, ChunkId, generate_chunk_mesh, TerrainVertex, CHUNK
 use crate::world::{Settlement, RoadNetwork, BuildingPlacer};
 use nalgebra::{Vector3, UnitQuaternion, Matrix4};
 use crate::physics::Vehicle;
+use crate::network::PlayerInput;
 
 // Fixed timestep for physics (60 Hz)
 const PHYSICS_TIMESTEP: f32 = 1.0 / 60.0;
@@ -46,6 +47,10 @@ pub struct Engine {
     road_network: Option<RoadNetwork>,
     mission_generator: Option<MissionGenerator>,
     current_mission: Option<Mission>,
+    // Вертолёт - физика из helicopter.rs
+    helicopter: Option<crate::physics::Helicopter>,
+    // Компас - направление на цель миссии
+    compass_heading: f32,
     vehicle_chassis_id: Option<usize>,
     chunk_mesh_data: Option<(Vec<f32>, Vec<u32>)>,  // vertices, indices for terrain
     // Sprint 5: Weather, Day/Night, Particles, Debug
@@ -479,7 +484,7 @@ impl Engine {
     }
 
     // Сохр-1: Save game state to file
-    fn save_game_state(&self) {
+    fn save_game_state(&mut self) {
         use crate::game::mission_save::{MissionSaveManager, WorldState};
         use nalgebra::Vector3;
         
@@ -489,9 +494,12 @@ impl Engine {
         if let Some(ref v) = self.vehicle {
             let pos = v.position();
             let rot = v.body().rotation;
+            let vel = v.body().velocity;
             world_state.vehicle_position = [pos.x, pos.y, pos.z];
             world_state.vehicle_rotation = [rot.i, rot.j, rot.k, rot.w];
+            world_state.vehicle_velocity = [vel.x, vel.y, vel.z];
             world_state.vehicle_fuel = self.vehicle_fuel;
+            world_state.vehicle_health = self.vehicle_health;
         }
         
         // Save time of day and weather
@@ -557,6 +565,19 @@ impl Engine {
             self.save_game_state();
         }
 
+        // Миссия-1: Автогенерация миссий если нет активной
+        if self.current_mission.is_none() {
+            if let Some(ref mut gen) = self.mission_generator {
+                if let Some(ref vehicle) = self.vehicle {
+                    let player_pos = vehicle.position();
+                    self.current_mission = gen.generate_mission(player_pos);
+                    if let Some(ref mission) = self.current_mission {
+                        println!("Новая миссия: {}", mission.description);
+                    }
+                }
+            }
+        }
+
         // Update systems based on current menu state
         match self.graphics_context.renderer.menu_state {
             MenuState::InGame | MenuState::Paused => {
@@ -582,10 +603,11 @@ impl Engine {
                             self.vehicle_steering,
                             0.0,
                         ));
-                        // Получить высоту из OpenWorld
+                        // Получить высоту и тип поверхности из OpenWorld
                         if let Some(ref open_world) = self.open_world {
                             let h = |x: f32, z: f32| open_world.get_generator().get_height(x, z);
-                            vehicle.update(PHYSICS_TIMESTEP, h);
+                            let s = |x: f32, z: f32| open_world.get_generator().get_surface_type(x, z, h(x, z));
+                            vehicle.update(PHYSICS_TIMESTEP, h, s);
                         }
                         // Синхронизировать chassis body в PhysicsWorld
                         if let Some(chassis_id) = self.vehicle_chassis_id {
