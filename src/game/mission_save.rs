@@ -188,9 +188,32 @@ pub struct WorldState {
     pub current_location: String,
     pub weather: String,
     pub time_of_day: f32, // 0.0 - 24.0
+    pub vehicle_position: [f32; 3],
+    pub vehicle_rotation: [f32; 4],
+    pub vehicle_velocity: [f32; 3],
+    pub vehicle_fuel: f32,
+    pub vehicle_health: f32,
     pub npcs_alive: HashMap<String, bool>,
     pub destroyed_objects: Vec<String>,
     pub collected_items: Vec<String>,
+}
+
+impl Default for WorldState {
+    fn default() -> Self {
+        Self {
+            current_location: String::new(),
+            weather: String::from("Clear"),
+            time_of_day: 12.0,
+            vehicle_position: [0.0; 3],
+            vehicle_rotation: [0.0, 0.0, 0.0, 1.0],
+            vehicle_velocity: [0.0; 3],
+            vehicle_fuel: 1.0,
+            vehicle_health: 1.0,
+            npcs_alive: HashMap::new(),
+            destroyed_objects: Vec::new(),
+            collected_items: Vec::new(),
+        }
+    }
 }
 
 /// Game settings
